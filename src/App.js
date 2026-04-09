@@ -1,4 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+
+// ─── Firestore 設定 ───────────────────────────────────────────────────────────
+const FIRESTORE_PROJECT = "coreaee-65e7f";
+const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/briefings/latest`;
+
+async function fetchBriefingFromFirestore() {
+  const res = await fetch(FIRESTORE_URL);
+  if (!res.ok) throw new Error(`Firestore HTTP ${res.status}`);
+  const doc = await res.json();
+  // doc.fields.payload は JSON 文字列として保存
+  const raw = doc?.fields?.payload?.stringValue;
+  if (!raw) throw new Error("payload field missing");
+  const data = JSON.parse(raw);
+  const updatedAt = doc?.fields?.updatedAt?.stringValue || null;
+  return { ...data, _updatedAt: updatedAt, _fromFirestore: true };
+}
 
 // ─── 分頁定義 ─────────────────────────────────────────────────────────────────
 const SECTIONS = [
@@ -361,45 +377,75 @@ function ImpactDot({ impact }) {
 // ─── 主組件 ──────────────────────────────────────────────────────────────────
 export default function MorningBriefing() {
   const [active, setActive] = useState(0);
-  const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [firestoreData, setFirestoreData] = useState(null);
+  const [firestoreError, setFirestoreError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const fetchedRef = useRef(false);
 
-  const handleRefresh = useCallback(() => {
+  // Firestore 資料拉取
+  const loadFirestore = useCallback(async () => {
     setIsRefreshing(true);
-    setTimeout(() => {
+    setFirestoreError(null);
+    try {
+      const data = await fetchBriefingFromFirestore();
+      setFirestoreData(data);
+      setLastUpdated(data._updatedAt ? new Date(data._updatedAt) : new Date());
+    } catch (err) {
+      console.warn("Firestore 讀取失敗，使用內建示範數據:", err.message);
+      setFirestoreError(err.message);
       setLastUpdated(new Date());
+    } finally {
       setIsRefreshing(false);
-    }, 800);
+    }
   }, []);
 
-  // 每分鐘檢查是否到達 08:00 / 16:00 / 21:00（台灣時間）
+  // 初次載入
+  useEffect(() => {
+    if (!fetchedRef.current) {
+      fetchedRef.current = true;
+      loadFirestore();
+    }
+  }, [loadFirestore]);
+
+  // 定時自動觸發（整點時重新拉取）
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date();
       const twOffset = 8 * 60;
       const localOffset = now.getTimezoneOffset();
       const twNow = new Date(now.getTime() + (twOffset + localOffset) * 60000);
-      const h = twNow.getHours();
-      const m = twNow.getMinutes();
-      if (UPDATE_HOURS.includes(h) && m === 0) {
-        handleRefresh();
+      if (UPDATE_HOURS.includes(twNow.getHours()) && twNow.getMinutes() === 0) {
+        loadFirestore();
       }
     }, 60000);
     return () => clearInterval(timer);
-  }, [handleRefresh]);
+  }, [loadFirestore]);
+
+  // live data 優先，fallback 到 module-level 常數
+  const live = firestoreData || {};
+  const liveMarket = live.marketData || marketData;
+  const liveTechNews = live.techNews || techNews;
+  const liveTrumpStatements = live.trumpStatements || trumpStatements;
+  const liveAiUpdates = live.aiUpdates || null;
 
   const renderSection = () => {
     switch (active) {
-      case 0: return <MarketOverview />;
-      case 1: return <MarketFactors />;
-      case 2: return <TechStocks />;
+      case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} />;
+      case 1: return <MarketFactors twFocus={live.twStockFocus} twData={live.twData} />;
+      case 2: return <TechStocks news={liveTechNews} />;
       case 3: return <IranWar />;
-      case 4: return <TrumpWatch />;
-      case 5: return <AIFrontier />;
+      case 4: return <TrumpWatch statements={liveTrumpStatements} />;
+      case 5: return <AIFrontier liveUpdates={liveAiUpdates} />;
       case 6: return <GitHubTrending />;
       default: return null;
     }
   };
+
+  // 顯示用日期
+  const displayDate = lastUpdated
+    ? lastUpdated.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "short", timeZone: "Asia/Taipei" })
+    : "載入中...";
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f4ed", color: "#141413", fontFamily: "'Georgia', 'Noto Serif TC', serif" }}>
@@ -418,11 +464,14 @@ export default function MorningBriefing() {
             </h1>
           </div>
           <div style={{ textAlign: "right", fontFamily: "'Source Sans 3', sans-serif" }}>
-            <div style={{ fontSize: 13, color: "#5e5d59" }}>2026 年 4 月 9 日（三）</div>
-            <div style={{ fontSize: 11, color: "#87867f", marginBottom: 8 }}>停火協議大漲日</div>
-            {/* 更新控制 */}
+            <div style={{ fontSize: 13, color: "#5e5d59" }}>{displayDate}</div>
+            {/* 數據來源標示 */}
+            <div style={{ fontSize: 10, marginBottom: 6, color: firestoreError ? "#b91c1c" : "#166534" }}>
+              {isRefreshing ? "⟳ 載入中..." : firestoreError ? "⚠ 使用示範數據" : "✓ 即時數據"}
+            </div>
+            {/* 更新按鈕 */}
             <button
-              onClick={handleRefresh}
+              onClick={loadFirestore}
               disabled={isRefreshing}
               style={{
                 display: "flex", alignItems: "center", gap: 5, marginLeft: "auto",
@@ -430,37 +479,45 @@ export default function MorningBriefing() {
                 background: isRefreshing ? "#f5e6df" : "#fff",
                 color: "#c96442", fontSize: 12, fontWeight: 600,
                 cursor: isRefreshing ? "not-allowed" : "pointer",
-                fontFamily: "'Source Sans 3', sans-serif",
-                transition: "all 0.2s",
+                fontFamily: "'Source Sans 3', sans-serif", transition: "all 0.2s",
               }}
             >
               <span style={{ display: "inline-block", animation: isRefreshing ? "spin 0.8s linear infinite" : "none" }}>⟳</span>
               {isRefreshing ? "更新中..." : "手動更新"}
             </button>
-            <div style={{ fontSize: 10, color: "#87867f", marginTop: 4 }}>
-              上次更新：{formatTwTime(lastUpdated)} TST
-            </div>
+            {lastUpdated && (
+              <div style={{ fontSize: 10, color: "#87867f", marginTop: 4 }}>
+                更新：{formatTwTime(lastUpdated)} TST
+              </div>
+            )}
             <div style={{ fontSize: 10, color: "#c96442", marginTop: 2 }}>
               自動更新：{UPDATE_HOURS.join(" / ")} 時整
             </div>
           </div>
         </div>
 
-        {/* Quick Ticker */}
+        {/* Quick Ticker - 使用 live 數據 */}
         <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 4, scrollbarWidth: "none" }}>
-          {marketData.indices.map((m, i) => (
-            <div key={i} style={{
-              flex: "0 0 auto", padding: "8px 14px", borderRadius: 10,
-              background: "#fff", border: "1px solid #e8e6dc",
-              minWidth: 130, boxShadow: "0 1px 3px rgba(20,20,19,0.04)",
-            }}>
-              <div style={{ fontSize: 11, color: "#87867f", marginBottom: 2, fontFamily: "'Source Sans 3', sans-serif" }}>{m.name}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: "#141413" }}>{m.value}</div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: m.pct.includes("-") ? "#b91c1c" : "#166534", fontFamily: "'JetBrains Mono', monospace" }}>
-                {m.pct} {m.change}
+          {isRefreshing && !firestoreData ? (
+            // Skeleton loading
+            [1,2,3,4].map(i => (
+              <div key={i} style={{ flex: "0 0 auto", padding: "8px 14px", borderRadius: 10, background: "#fff", border: "1px solid #e8e6dc", minWidth: 130, height: 66, opacity: 0.5 }} />
+            ))
+          ) : (
+            liveMarket.indices.map((m, i) => (
+              <div key={i} style={{
+                flex: "0 0 auto", padding: "8px 14px", borderRadius: 10,
+                background: "#fff", border: "1px solid #e8e6dc",
+                minWidth: 130, boxShadow: "0 1px 3px rgba(20,20,19,0.04)",
+              }}>
+                <div style={{ fontSize: 11, color: "#87867f", marginBottom: 2, fontFamily: "'Source Sans 3', sans-serif" }}>{m.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: "#141413" }}>{m.value}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: m.pct.includes("-") ? "#b91c1c" : "#166534", fontFamily: "'JetBrains Mono', monospace" }}>
+                  {m.pct} {m.change}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
 
@@ -494,19 +551,20 @@ export default function MorningBriefing() {
 }
 
 // ─── 市場總覽 ─────────────────────────────────────────────────────────────────
-function MarketOverview() {
+function MarketOverview({ market, summary, insight, risk }) {
+  const indices = market?.indices || marketData.indices;
+  const extra = market?.extra || marketData.extra;
+
   return (
     <div>
       <Card>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 12 }}>📊 停火協議引爆全球大反彈</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 12 }}>📊 今日市場總結</div>
         <p style={{ fontSize: 14, lineHeight: 1.8, color: "#4d4c48", margin: 0 }}>
-          川普 4/8 凌晨宣布與伊朗達成兩週停火，伊朗同意開放荷莫茲海峽，引爆全球風險資產大反彈。
-          <strong style={{ color: "#c96442" }}> 道瓊狂飆 1,200 點（+2.6%），S&P 500 漲 2.4%，納斯達克噴漲 2.8%。</strong>
-          WTI 原油暴跌 17% 至 $93，航空與郵輪股全面飆漲。比特幣突破 $71,500。但 VP Vance 警告「這是脆弱的休戰」，市場仍對談判破裂保持警惕。
+          {summary || "川普 4/8 凌晨宣布與伊朗達成兩週停火，伊朗同意開放荷莫茲海峽，引爆全球風險資產大反彈。道瓊狂飆 1,200 點（+2.6%），S&P 500 漲 2.4%，納斯達克噴漲 2.8%。WTI 原油暴跌 17%，航空郵輪股全面飆漲。"}
         </p>
       </Card>
 
-      {marketData.indices.map((m, i) => (
+      {indices.map((m, i) => (
         <Card key={i}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -525,7 +583,7 @@ function MarketOverview() {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 12 }}>📈 其他關鍵指標</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {marketData.extra.map((e, i) => (
+          {extra.map((e, i) => (
             <div key={i} style={{ padding: "10px 12px", borderRadius: 10, background: "#fdfcf8" }}>
               <div style={{ fontSize: 11, color: "#87867f" }}>{e.name}</div>
               <div style={{ fontSize: 15, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{e.value}</div>
@@ -535,22 +593,24 @@ function MarketOverview() {
         </div>
       </Card>
 
-      <Card>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>⚠️ 本週重要數據</div>
-        <div style={{ fontSize: 13, color: "#4d4c48", lineHeight: 1.8 }}>
-          • <strong>4/8</strong> 達美航空 Q1 財報超預期，航空股全面大漲<br />
-          • <strong>4/9</strong> Q4 GDP 終值、2月 PCE 物價指數（Fed 偏好通膨指標）<br />
-          • <strong>4/10</strong> 3月 CPI 與核心 CPI、密大消費者信心指數<br />
-          • <strong>4/22</strong> 特斯拉 Q1 財報（盤後）<br />
-          • 非農就業 178K 遠超預期，失業率 4.3%，Fed 利率按兵不動機率 98%
-        </div>
-      </Card>
+      {insight && (
+        <Card style={{ background: "#f0f7f4", borderColor: "#c6ddd2" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#2d6a4f", marginBottom: 8 }}>💡 今日操作洞察</div>
+          <p style={{ fontSize: 13, lineHeight: 1.7, color: "#4d4c48", margin: 0 }}>{insight}</p>
+        </Card>
+      )}
+      {risk && (
+        <Card style={{ background: "#fef2f2", borderColor: "#fecaca" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 6 }}>⚠️ 今日最大風險</div>
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: "#4d4c48", margin: 0 }}>{risk}</p>
+        </Card>
+      )}
     </div>
   );
 }
 
 // ─── 美台股影響因素 ─────────────────────────────────────────────────────────
-function MarketFactors() {
+function MarketFactors({ twFocus, twData: liveTw }) {
   const [tab, setTab] = useState("us");
   const factors = tab === "us" ? usFactors : twFactors;
 
@@ -617,10 +677,11 @@ function MarketFactors() {
 }
 
 // ─── 科技股 ─────────────────────────────────────────────────────────────────
-function TechStocks() {
+function TechStocks({ news }) {
+  const items = news || techNews;
   return (
     <div>
-      {techNews.map((t, i) => (
+      {items.map((t, i) => (
         <Card key={i}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{
@@ -698,8 +759,9 @@ function IranWar() {
 }
 
 // ─── 川普動態 ─────────────────────────────────────────────────────────────────
-function TrumpWatch() {
+function TrumpWatch({ statements }) {
   const [showTimeline, setShowTimeline] = useState(true);
+  const liveStatements = statements || trumpStatements;
 
   return (
     <div>
@@ -726,7 +788,7 @@ function TrumpWatch() {
       {showTimeline && (
         <div style={{ position: "relative", paddingLeft: 20, marginBottom: 16 }}>
           <div style={{ position: "absolute", left: 8, top: 0, bottom: 0, width: 2, background: "linear-gradient(to bottom, #c96442, #e8e6dc)" }} />
-          {trumpStatements.map((s, i) => (
+          {liveStatements.map((s, i) => (
             <div key={i} style={{ position: "relative", marginBottom: 20, paddingLeft: 16 }}>
               <div style={{
                 position: "absolute", left: -16, top: 6,
@@ -781,7 +843,16 @@ function TrumpWatch() {
 }
 
 // ─── AI 前沿 ─────────────────────────────────────────────────────────────────
-function AIFrontier() {
+// key → aiCompanyUpdates 中對應的 company 欄位
+const AI_COMPANY_KEY_MAP = {
+  claude: "Anthropic / Claude",
+  openai: "OpenAI",
+  google: "Google / DeepMind",
+  copilot: "Microsoft / Copilot",
+  codex: "OpenAI Codex",
+};
+
+function AIFrontier({ liveUpdates }) {
   const [selectedCompany, setSelectedCompany] = useState(null);
 
   return (
@@ -795,44 +866,55 @@ function AIFrontier() {
 
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginBottom: 12 }}>📡 各家 AI 最新動態</div>
 
-      {aiCompanyUpdates.map((company, ci) => (
-        <Card key={ci} style={{ background: company.bgColor, borderColor: company.color + "30" }}>
-          <div
-            onClick={() => setSelectedCompany(selectedCompany === ci ? null : ci)}
-            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 22 }}>{company.logo}</span>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: company.color }}>{company.company}</div>
-                <div style={{ fontSize: 11, color: "#87867f", fontFamily: "'JetBrains Mono', monospace" }}>{company.model}</div>
+      {aiCompanyUpdates.map((company, ci) => {
+        // 找出此公司對應的 liveUpdates key
+        const liveKey = Object.entries(AI_COMPANY_KEY_MAP).find(([, v]) => v === company.company)?.[0];
+        const liveText = liveUpdates?.[liveKey];
+        return (
+          <Card key={ci} style={{ background: company.bgColor, borderColor: company.color + "30" }}>
+            <div
+              onClick={() => setSelectedCompany(selectedCompany === ci ? null : ci)}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 22 }}>{company.logo}</span>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: company.color }}>{company.company}</div>
+                  <div style={{ fontSize: 11, color: "#87867f", fontFamily: "'JetBrains Mono', monospace" }}>{company.model}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {liveText && <Badge color={company.color}>🔴 即時</Badge>}
+                <Badge color={company.color}>{company.updates.length} 則更新</Badge>
+                <span style={{ fontSize: 14, color: "#87867f" }}>{selectedCompany === ci ? "▲" : "▼"}</span>
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <Badge color={company.color}>{company.updates.length} 則更新</Badge>
-              <span style={{ fontSize: 14, color: "#87867f" }}>{selectedCompany === ci ? "▲" : "▼"}</span>
-            </div>
-          </div>
 
-          {selectedCompany === ci && (
-            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              {company.updates.map((update, ui) => (
-                <div key={ui} style={{
-                  padding: "10px 14px", borderRadius: 10, background: "#fff",
-                  borderLeft: `3px solid ${company.color}`,
-                }}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#87867f" }}>{update.date}</span>
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: company.color + "18", color: company.color, fontWeight: 700 }}>{update.type}</span>
+            {/* Gemini 生成的即時摘要 */}
+            {liveText && (
+              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: company.color + "10", borderLeft: `3px solid ${company.color}` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: company.color, marginBottom: 3 }}>🤖 今日 AI 摘要</div>
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: "#4d4c48" }}>{liveText}</div>
+              </div>
+            )}
+
+            {selectedCompany === ci && (
+              <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+                {company.updates.map((update, ui) => (
+                  <div key={ui} style={{ padding: "10px 14px", borderRadius: 10, background: "#fff", borderLeft: `3px solid ${company.color}` }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 5, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#87867f" }}>{update.date}</span>
+                      <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: company.color + "18", color: company.color, fontWeight: 700 }}>{update.type}</span>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#141413", marginBottom: 4 }}>{update.title}</div>
+                    <div style={{ fontSize: 12, lineHeight: 1.6, color: "#5e5d59" }}>{update.desc}</div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#141413", marginBottom: 4 }}>{update.title}</div>
-                  <div style={{ fontSize: 12, lineHeight: 1.6, color: "#5e5d59" }}>{update.desc}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      ))}
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })}
 
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginTop: 20, marginBottom: 12 }}>📰 延伸閱讀</div>
       {aiArticles.map((a, i) => (

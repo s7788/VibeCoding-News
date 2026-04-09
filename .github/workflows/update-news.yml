@@ -1,0 +1,47 @@
+name: 全球市場日報自動更新
+
+on:
+  schedule:
+    # 台灣時間 08:00 = UTC 00:00
+    - cron: '0 0 * * 1-5'
+    # 台灣時間 16:00 = UTC 08:00
+    - cron: '0 8 * * 1-5'
+    # 台灣時間 21:00 = UTC 13:00
+    - cron: '0 13 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: '手動觸發原因'
+        required: false
+        default: '手動更新'
+
+jobs:
+  update-briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run update script
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python scripts/update_data.py
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "⚠️ 更新失敗，請檢查 Actions 日誌"
+          echo "時間：$(date -u '+%Y-%m-%d %H:%M UTC')"
