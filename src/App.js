@@ -21,12 +21,6 @@ async function fetchBriefingFromFirestore() {
   return { ...data, _updatedAt: updatedAt, _fromFirestore: true };
 }
 
-function isDevTriggerEnabled() {
-  if (typeof window === "undefined") return false;
-  const params = new URLSearchParams(window.location.search);
-  return window.location.hostname === "localhost" || params.get("devUpdate") === "1";
-}
-
 async function dispatchUpdateWorkflow(token, reason) {
   const res = await fetch(
     `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW}/dispatches`,
@@ -427,7 +421,6 @@ export default function MorningBriefing() {
   const [dispatchMessage, setDispatchMessage] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const fetchedRef = useRef(false);
-  const devTriggerEnabled = isDevTriggerEnabled();
 
   // Firestore 資料拉取
   const loadFirestore = useCallback(async () => {
@@ -455,7 +448,7 @@ export default function MorningBriefing() {
   }, [loadFirestore]);
 
   const triggerImmediateUpdate = useCallback(async () => {
-    if (!devTriggerEnabled || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
 
     const cachedToken = window.sessionStorage.getItem(DEV_TRIGGER_TOKEN_KEY) || "";
     const token = window.prompt("輸入 GitHub Personal Access Token 以觸發更新 workflow", cachedToken)?.trim();
@@ -477,7 +470,7 @@ export default function MorningBriefing() {
     } finally {
       setIsDispatchingUpdate(false);
     }
-  }, [devTriggerEnabled]);
+  }, []);
 
   // 定時自動觸發（整點時重新拉取）
   useEffect(() => {
@@ -556,23 +549,21 @@ export default function MorningBriefing() {
               <span style={{ display: "inline-block", animation: isRefreshing ? "spin 0.8s linear infinite" : "none" }}>⟳</span>
               {isRefreshing ? "更新中..." : "手動更新"}
             </button>
-            {devTriggerEnabled && (
-              <button
-                onClick={triggerImmediateUpdate}
-                disabled={isDispatchingUpdate}
-                style={{
-                  display: "flex", alignItems: "center", gap: 5, marginLeft: "auto", marginTop: 6,
-                  padding: "5px 12px", borderRadius: 8, border: "1px solid #1f2937",
-                  background: isDispatchingUpdate ? "#eceff3" : "#fff",
-                  color: "#1f2937", fontSize: 12, fontWeight: 600,
-                  cursor: isDispatchingUpdate ? "not-allowed" : "pointer",
-                  fontFamily: "'Source Sans 3', sans-serif", transition: "all 0.2s",
-                }}
-              >
-                <span style={{ display: "inline-block", animation: isDispatchingUpdate ? "spin 0.8s linear infinite" : "none" }}>↗</span>
-                {isDispatchingUpdate ? "送出中..." : "開發測試：立即更新"}
-              </button>
-            )}
+            <button
+              onClick={triggerImmediateUpdate}
+              disabled={isDispatchingUpdate}
+              style={{
+                display: "flex", alignItems: "center", gap: 5, marginLeft: "auto", marginTop: 6,
+                padding: "5px 12px", borderRadius: 8, border: "1px solid #1f2937",
+                background: isDispatchingUpdate ? "#eceff3" : "#fff",
+                color: "#1f2937", fontSize: 12, fontWeight: 600,
+                cursor: isDispatchingUpdate ? "not-allowed" : "pointer",
+                fontFamily: "'Source Sans 3', sans-serif", transition: "all 0.2s",
+              }}
+            >
+              <span style={{ display: "inline-block", animation: isDispatchingUpdate ? "spin 0.8s linear infinite" : "none" }}>↗</span>
+              {isDispatchingUpdate ? "送出中..." : "開發測試：立即更新"}
+            </button>
             {lastUpdated && (
               <div style={{ fontSize: 10, color: "#87867f", marginTop: 4 }}>
                 更新：{formatTwTime(lastUpdated)} TST
@@ -581,11 +572,9 @@ export default function MorningBriefing() {
             <div style={{ fontSize: 10, color: "#c96442", marginTop: 2 }}>
               自動更新：{UPDATE_HOURS.join(" / ")} 時整
             </div>
-            {devTriggerEnabled && (
-              <div style={{ fontSize: 10, color: dispatchMessage?.startsWith("觸發失敗") ? "#b91c1c" : "#1f2937", marginTop: 4, maxWidth: 280 }}>
-                {dispatchMessage || "開發模式下可用：會觸發 GitHub Actions 的 workflow_dispatch，而不是只重抓 Firestore。"}
-              </div>
-            )}
+            <div style={{ fontSize: 10, color: dispatchMessage?.startsWith("觸發失敗") ? "#b91c1c" : "#1f2937", marginTop: 4, maxWidth: 280 }}>
+              {dispatchMessage || "會觸發 GitHub Actions 的 workflow_dispatch，而不是只重抓 Firestore。"}
+            </div>
           </div>
         </div>
 
