@@ -12,14 +12,15 @@ import time
 import traceback
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timezone
 
 # ── 初始化 ────────────────────────────────────────────────────────────────────
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 
 # Yahoo Finance 直接 HTTP（yfinance 在 CI 環境有 cookie 問題）
 YF_HEADERS = {
@@ -256,9 +257,10 @@ def generate_with_gemini(market_data, tw_data, headlines):
 5. 所有數字需具體，不要使用模糊描述
 6. 直接回傳 JSON，絕對不要包在 ```json ``` 中"""
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
+    response = gemini.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
             temperature=0.3,
             max_output_tokens=4096,
         ),
