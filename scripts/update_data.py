@@ -1,16 +1,16 @@
 """
 全球市場日報 — 自動更新腳本
 排程：台灣時間 08:00 / 16:00 / 21:00
-數據來源：Yahoo Finance + RSS 財經新聞
-AI 摘要：Gemini 2.0 Flash
+數據來源：Yahoo Finance v8 API + RSS 財經新聞
+AI 摘要：Gemini 2.5 Flash
 儲存：Firestore briefings/latest
 """
 
 import os
 import json
+import time
 import traceback
 import feedparser
-import yfinance as yf
 import requests
 import google.generativeai as genai
 import firebase_admin
@@ -19,7 +19,34 @@ from datetime import datetime, timezone
 
 # ── 初始化 ────────────────────────────────────────────────────────────────────
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-2.0-flash")
+model = genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+
+# Yahoo Finance 直接 HTTP（yfinance 在 CI 環境有 cookie 問題）
+YF_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+def yf_history(symbol, range_="7d", interval="1d"):
+    """Yahoo Finance v8 API 直接呼叫，繞過 yfinance cookie 限制"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {"interval": interval, "range": range_, "includeAdjustedClose": True}
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, headers=YF_HEADERS, timeout=15)
+            data = r.json()
+            result = data["chart"]["result"][0]
+            closes = (
+                result["indicators"].get("adjclose", [{}])[0].get("adjclose")
+                or result["indicators"]["quote"][0]["close"]
+            )
+            closes = [c for c in closes if c is not None]
+            return closes
+        except Exception as e:
+            print(f"    retry {attempt+1}/3 {symbol}: {e}")
+            time.sleep(2)
+    return []
 
 cred = credentials.Certificate(json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"]))
 firebase_admin.initialize_app(cred)
@@ -53,12 +80,11 @@ def fetch_market_data():
     indices = []
     for name, symbol in US_TICKERS.items():
         try:
-            hist = yf.Ticker(symbol).history(period="7d")
-            if len(hist) < 2:
+            closes = yf_history(symbol, range_="7d")
+            if len(closes) < 2:
+                print(f"  ✗ {name}: 不足數據點 ({len(closes)})")
                 continue
-            curr = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2])
-            week_start = float(hist["Close"].iloc[0])
+            curr, prev, week_start = closes[-1], closes[-2], closes[0]
             change = curr - prev
             pct = (change / prev) * 100
             weekly = ((curr - week_start) / week_start) * 100
@@ -79,17 +105,17 @@ def fetch_market_data():
     extra = []
     for name, (symbol, prefix, is_rate) in EXTRA_TICKERS.items():
         try:
-            hist = yf.Ticker(symbol).history(period="3d")
-            if len(hist) < 2:
+            closes = yf_history(symbol, range_="5d")
+            if len(closes) < 2:
                 continue
-            curr = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2])
+            curr, prev = closes[-1], closes[-2]
             pct = ((curr - prev) / prev) * 100
             extra.append({
                 "name": name,
                 "value": fmt_price(curr, prefix, is_rate),
                 "pct": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
             })
+            print(f"  ✓ {name}: {fmt_price(curr, prefix, is_rate)} ({pct:+.1f}%)")
         except Exception as e:
             print(f"  ✗ {name}: {e}")
 
@@ -99,10 +125,9 @@ def fetch_market_data():
 def fetch_tw_market():
     result = {}
     try:
-        hist = yf.Ticker("^TWII").history(period="3d")
-        if len(hist) >= 2:
-            curr = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2])
+        closes = yf_history("^TWII", range_="5d")
+        if len(closes) >= 2:
+            curr, prev = closes[-1], closes[-2]
             pct = ((curr - prev) / prev) * 100
             result["taiex"] = f"{curr:,.0f}"
             result["taiex_pct"] = f"{'+' if pct >= 0 else ''}{pct:.1f}%"
@@ -112,22 +137,20 @@ def fetch_tw_market():
         print(f"  ✗ 台股：{e}")
 
     try:
-        hist = yf.Ticker("TWD=X").history(period="3d")
-        if len(hist) >= 1:
-            rate = float(hist["Close"].iloc[-1])
-            result["usd_twd"] = f"{rate:.2f}"
+        closes = yf_history("TWD=X", range_="5d")
+        if closes:
+            result["usd_twd"] = f"{closes[-1]:.2f}"
     except Exception:
         pass
 
     try:
-        # 台積電 ADR 作為替代指標
-        hist = yf.Ticker("TSM").history(period="3d")
-        if len(hist) >= 2:
-            curr = float(hist["Close"].iloc[-1])
-            prev = float(hist["Close"].iloc[-2])
+        closes = yf_history("TSM", range_="5d")
+        if len(closes) >= 2:
+            curr, prev = closes[-1], closes[-2]
             pct = ((curr - prev) / prev) * 100
             result["tsm"] = f"${curr:.2f}"
             result["tsm_pct"] = f"{'+' if pct >= 0 else ''}{pct:.1f}%"
+            print(f"  ✓ TSM ADR: ${curr:.2f} ({pct:+.1f}%)")
     except Exception:
         pass
 
