@@ -8,6 +8,7 @@ const GITHUB_REPO = "VibeCoding-News";
 const GITHUB_WORKFLOW = "update-news.yml";
 const GITHUB_REF = "master";
 const DEV_TRIGGER_TOKEN_KEY = "news-briefing-dev-update-token";
+const LIVE_DATA_MAX_AGE_DAYS = 3;
 
 async function fetchBriefingFromFirestore() {
   const res = await fetch(FIRESTORE_URL);
@@ -396,6 +397,12 @@ function formatTwTime(date) {
   return `${tw.getHours().toString().padStart(2, "0")}:${tw.getMinutes().toString().padStart(2, "0")}`;
 }
 
+function isRecentEnough(date, maxAgeDays = LIVE_DATA_MAX_AGE_DAYS) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+  const ageMs = Date.now() - date.getTime();
+  return ageMs <= maxAgeDays * 24 * 60 * 60 * 1000;
+}
+
 // ─── 共用 UI 元件 ─────────────────────────────────────────────────────────────
 function Badge({ children, color = "#c96442" }) {
   return (
@@ -507,8 +514,10 @@ export default function MorningBriefing() {
     return () => clearInterval(timer);
   }, [loadFirestore]);
 
-  // live data 優先，fallback 到 module-level 常數
-  const live = firestoreData || {};
+  const hasUsableFirestoreData = Boolean(firestoreData && lastUpdated && isRecentEnough(lastUpdated));
+
+  // live data 優先，超過 3 天則退回中性 fallback
+  const live = hasUsableFirestoreData ? firestoreData : {};
   const liveMarket = live.marketData || marketData;
   const liveTechNews = live.techNews || techNews;
   const liveTrumpStatements = live.trumpStatements || trumpStatements;
@@ -516,7 +525,7 @@ export default function MorningBriefing() {
 
   const renderSection = () => {
     switch (active) {
-      case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} hasLiveData={Boolean(firestoreData)} />;
+      case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} hasLiveData={hasUsableFirestoreData} />;
       case 1: return <MarketFactors twFocus={live.twStockFocus} twData={live.twData} market={liveMarket} />;
       case 2: return <TechStocks news={liveTechNews} />;
       case 3: return <IranWar market={liveMarket} />;
@@ -552,7 +561,13 @@ export default function MorningBriefing() {
             <div style={{ fontSize: 13, color: "#5e5d59" }}>{displayDate}</div>
             {/* 數據來源標示 */}
             <div style={{ fontSize: 10, marginBottom: 6, color: firestoreError ? "#b91c1c" : "#166534" }}>
-              {isRefreshing ? "⟳ 載入中..." : firestoreError ? "⚠ 使用示範數據" : "✓ 即時數據"}
+              {isRefreshing
+                ? "⟳ 載入中..."
+                : firestoreError
+                  ? "⚠ 使用示範數據"
+                  : hasUsableFirestoreData
+                    ? `✓ 3 天內資料`
+                    : "⚠ 資料已超過 3 天"}
             </div>
             {/* 更新按鈕 */}
             <button
@@ -667,7 +682,7 @@ function MarketOverview({ market, summary, insight, risk, hasLiveData }) {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 12 }}>📊 今日市場總結</div>
         <p style={{ fontSize: 14, lineHeight: 1.8, color: "#4d4c48", margin: 0 }}>
-          {summary || (hasLiveData ? "最新摘要載入中。" : "目前無法取得即時摘要，以下區塊可能顯示示範內容，請以重新同步後的資料為準。")}
+          {summary || (hasLiveData ? "最近 3 天內的摘要資料可正常顯示。" : "目前無可用的 3 天內資料，以下區塊改顯示中性內容，請待下一次同步後再查看。")}
         </p>
       </Card>
 
