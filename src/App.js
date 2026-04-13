@@ -3,6 +3,11 @@ import { useState, useEffect, useCallback, useRef } from "react";
 // ─── Firestore 設定 ───────────────────────────────────────────────────────────
 const FIRESTORE_PROJECT = "coreaee-65e7f";
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT}/databases/(default)/documents/briefings/latest`;
+const GITHUB_OWNER = "s7788";
+const GITHUB_REPO = "VibeCoding-News";
+const GITHUB_WORKFLOW = "update-news.yml";
+const GITHUB_REF = "master";
+const DEV_TRIGGER_TOKEN_KEY = "news-briefing-dev-update-token";
 
 async function fetchBriefingFromFirestore() {
   const res = await fetch(FIRESTORE_URL);
@@ -14,6 +19,44 @@ async function fetchBriefingFromFirestore() {
   const data = JSON.parse(raw);
   const updatedAt = doc?.fields?.updatedAt?.stringValue || null;
   return { ...data, _updatedAt: updatedAt, _fromFirestore: true };
+}
+
+function isDevTriggerEnabled() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return window.location.hostname === "localhost" || params.get("devUpdate") === "1";
+}
+
+async function dispatchUpdateWorkflow(token, reason) {
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW}/dispatches`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      body: JSON.stringify({
+        ref: GITHUB_REF,
+        inputs: {
+          reason,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const payload = await res.json();
+      if (payload?.message) detail = payload.message;
+    } catch {
+      // Keep the HTTP status text if the body is not JSON.
+    }
+    throw new Error(`GitHub API ${res.status}: ${detail}`);
+  }
 }
 
 // ─── 分頁定義 ─────────────────────────────────────────────────────────────────
@@ -378,10 +421,13 @@ function ImpactDot({ impact }) {
 export default function MorningBriefing() {
   const [active, setActive] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isDispatchingUpdate, setIsDispatchingUpdate] = useState(false);
   const [firestoreData, setFirestoreData] = useState(null);
   const [firestoreError, setFirestoreError] = useState(null);
+  const [dispatchMessage, setDispatchMessage] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const fetchedRef = useRef(false);
+  const devTriggerEnabled = isDevTriggerEnabled();
 
   // Firestore 資料拉取
   const loadFirestore = useCallback(async () => {
@@ -407,6 +453,31 @@ export default function MorningBriefing() {
       loadFirestore();
     }
   }, [loadFirestore]);
+
+  const triggerImmediateUpdate = useCallback(async () => {
+    if (!devTriggerEnabled || typeof window === "undefined") return;
+
+    const cachedToken = window.sessionStorage.getItem(DEV_TRIGGER_TOKEN_KEY) || "";
+    const token = window.prompt("輸入 GitHub Personal Access Token 以觸發更新 workflow", cachedToken)?.trim();
+    if (!token) return;
+
+    const defaultReason = `前端開發測試觸發 ${new Date().toLocaleString("sv-SE", { timeZone: "Asia/Taipei" })}`;
+    const reason = window.prompt("本次 workflow_dispatch 的原因", defaultReason);
+    if (reason === null) return;
+
+    window.sessionStorage.setItem(DEV_TRIGGER_TOKEN_KEY, token);
+    setDispatchMessage(null);
+    setIsDispatchingUpdate(true);
+
+    try {
+      await dispatchUpdateWorkflow(token, reason.trim() || defaultReason);
+      setDispatchMessage("已送出背景更新，等待 GitHub Actions 完成後再按一次手動更新即可讀到最新資料。");
+    } catch (err) {
+      setDispatchMessage(`觸發失敗：${err.message}`);
+    } finally {
+      setIsDispatchingUpdate(false);
+    }
+  }, [devTriggerEnabled]);
 
   // 定時自動觸發（整點時重新拉取）
   useEffect(() => {
@@ -485,6 +556,23 @@ export default function MorningBriefing() {
               <span style={{ display: "inline-block", animation: isRefreshing ? "spin 0.8s linear infinite" : "none" }}>⟳</span>
               {isRefreshing ? "更新中..." : "手動更新"}
             </button>
+            {devTriggerEnabled && (
+              <button
+                onClick={triggerImmediateUpdate}
+                disabled={isDispatchingUpdate}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, marginLeft: "auto", marginTop: 6,
+                  padding: "5px 12px", borderRadius: 8, border: "1px solid #1f2937",
+                  background: isDispatchingUpdate ? "#eceff3" : "#fff",
+                  color: "#1f2937", fontSize: 12, fontWeight: 600,
+                  cursor: isDispatchingUpdate ? "not-allowed" : "pointer",
+                  fontFamily: "'Source Sans 3', sans-serif", transition: "all 0.2s",
+                }}
+              >
+                <span style={{ display: "inline-block", animation: isDispatchingUpdate ? "spin 0.8s linear infinite" : "none" }}>↗</span>
+                {isDispatchingUpdate ? "送出中..." : "開發測試：立即更新"}
+              </button>
+            )}
             {lastUpdated && (
               <div style={{ fontSize: 10, color: "#87867f", marginTop: 4 }}>
                 更新：{formatTwTime(lastUpdated)} TST
@@ -493,6 +581,11 @@ export default function MorningBriefing() {
             <div style={{ fontSize: 10, color: "#c96442", marginTop: 2 }}>
               自動更新：{UPDATE_HOURS.join(" / ")} 時整
             </div>
+            {devTriggerEnabled && (
+              <div style={{ fontSize: 10, color: dispatchMessage?.startsWith("觸發失敗") ? "#b91c1c" : "#1f2937", marginTop: 4, maxWidth: 280 }}>
+                {dispatchMessage || "開發模式下可用：會觸發 GitHub Actions 的 workflow_dispatch，而不是只重抓 Firestore。"}
+              </div>
+            )}
           </div>
         </div>
 
