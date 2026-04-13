@@ -27,20 +27,26 @@ def get_best_gemini_model():
         r.raise_for_status()
         models = r.json().get("models", [])
         # 篩選支援 generateContent 的 flash 模型
+        EXCLUDE = ("tts", "image", "thinking", "audio", "vision")
         flash = [
             m["name"].replace("models/", "")
             for m in models
             if "flash" in m.get("name", "").lower()
             and "generateContent" in m.get("supportedGenerationMethods", [])
-            and "thinking" not in m.get("name", "").lower()
+            and not any(kw in m.get("name", "").lower() for kw in EXCLUDE)
         ]
         print(f"  可用 Flash 模型：{flash}")
-        # 優先順序：2.5 > 2.0 > 1.5 > 其他
-        for prefix in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash"]:
-            candidates = sorted([m for m in flash if m.startswith(prefix)], reverse=True)
-            if candidates:
-                return candidates[0]
-        return flash[0] if flash else "gemini-1.5-flash"
+        # 優先順序：3.x > 2.5 > 2.0 > 其他（不帶 preview/lite 優先）
+        for prefix in ["gemini-3-flash", "gemini-3.1-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash"]:
+            # 非 preview/lite 版優先
+            stable = [m for m in flash if m.startswith(prefix) and "preview" not in m and "lite" not in m]
+            if stable:
+                return sorted(stable, reverse=True)[0]
+            # 再找 preview 版
+            previews = [m for m in flash if m.startswith(prefix)]
+            if previews:
+                return sorted(previews, reverse=True)[0]
+        return flash[0] if flash else "gemini-2.0-flash"
     except Exception as e:
         print(f"  模型查詢失敗，使用預設：{e}")
         return "gemini-1.5-flash"
