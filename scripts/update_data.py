@@ -12,15 +12,15 @@ import time
 import traceback
 import feedparser
 import requests
-from google import genai
-from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timezone
 
 # ── 初始化 ────────────────────────────────────────────────────────────────────
-gemini = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+# 使用 REST API 直接呼叫，不依賴 SDK 版本
+GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # Yahoo Finance 直接 HTTP（yfinance 在 CI 環境有 cookie 問題）
 YF_HEADERS = {
@@ -257,15 +257,13 @@ def generate_with_gemini(market_data, tw_data, headlines):
 5. 所有數字需具體，不要使用模糊描述
 6. 直接回傳 JSON，絕對不要包在 ```json ``` 中"""
 
-    response = gemini.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.3,
-            max_output_tokens=4096,
-        ),
-    )
-    text = response.text.strip()
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
+    }
+    r = requests.post(GEMINI_URL, json=payload, timeout=90)
+    r.raise_for_status()
+    text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     # 清理可能的 markdown 包裝
     if text.startswith("```"):
