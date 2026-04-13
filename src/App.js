@@ -86,95 +86,109 @@ const marketData = {
   ],
 };
 
-// ─── 美台股影響因素 ─────────────────────────────────────────────────────────
-const usFactors = [
-  {
-    category: "總經 / Fed",
-    icon: "🏦",
-    color: "#1d4ed8",
-    items: [
-      { label: "Fed 利率決策", value: "按兵不動（機率 98%）", impact: "neutral", note: "非農 178K 遠超預期，通膨仍在 3% 以上" },
-      { label: "3月 CPI（4/10）", value: "預期 +3.1% YoY", impact: "bearish", note: "核心 CPI 若超預期，降息時程再推遲" },
-      { label: "Q4 GDP 終值（4/9）", value: "預期 +2.4%", impact: "neutral", note: "消費端仍穩健，投資面略弱" },
-      { label: "2月 PCE（4/9）", value: "預期 +2.6% YoY", impact: "neutral", note: "Fed 最偏好的通膨指標" },
-    ],
-  },
-  {
-    category: "地緣政治",
-    icon: "🌍",
-    color: "#b91c1c",
-    items: [
-      { label: "美伊停火（4/8）", value: "兩週暫停攻擊", impact: "bullish", note: "荷莫茲海峽開放，油價暴跌 17%" },
-      { label: "中美貿易戰", value: "Section 301 調查啟動", impact: "bearish", note: "5月川習峰會，新一輪關稅談判" },
-      { label: "俄烏局勢", value: "持續膠著", impact: "bearish", note: "歐洲能源溢價仍存，影響全球供應鏈" },
-    ],
-  },
-  {
-    category: "能源 / 商品",
-    icon: "⛽",
-    color: "#166534",
-    items: [
-      { label: "WTI 原油", value: "$93.42（停火暴跌）", impact: "bullish", note: "航空、郵輪、物流成本大幅下降" },
-      { label: "黃金", value: "$4,804（+2.2%）", impact: "neutral", note: "避險需求仍存，美元走弱支撐" },
-      { label: "銅價", value: "持平偏強", impact: "neutral", note: "中國製造業 PMI 回升帶動" },
-    ],
-  },
-  {
-    category: "企業財報",
-    icon: "📊",
-    color: "#7c3aed",
-    items: [
-      { label: "達美航空 Q1（4/8）", value: "超預期", impact: "bullish", note: "引爆航空股全面大漲" },
-      { label: "特斯拉 Q1（4/22）", value: "交付 358K，遜預期", impact: "bearish", note: "庫存積壓 5 萬輛，JPM 警告再跌 60%" },
-      { label: "Mag 7 財報季", value: "4月下旬開始", impact: "neutral", note: "估值已跌破大盤，Goldman 稱機會浮現" },
-    ],
-  },
-];
+function findMetric(metrics = [], name) {
+  return metrics.find((item) => item.name === name) || null;
+}
 
-const twFactors = [
-  {
-    category: "台股核心動能",
-    icon: "🇹🇼",
-    color: "#0f766e",
-    items: [
-      { label: "台積電（2330）", value: "CoWoS 滿載至 2027Q1", impact: "bullish", note: "AI 晶片需求爆發，N3/N2 產能全滿" },
-      { label: "外資動向", value: "連續 3 日買超", impact: "bullish", note: "停火消息帶動外資回補科技股" },
-      { label: "美元兌台幣", value: "31.85", impact: "neutral", note: "台幣升值壓縮出口廠商獲利" },
-      { label: "台股加權指數", value: "22,450（+1.8%）", impact: "bullish", note: "跟隨美股反彈，半導體族群領漲" },
-    ],
-  },
-  {
-    category: "供應鏈 / 出口",
-    icon: "🏭",
-    color: "#c2410c",
-    items: [
-      { label: "AI 伺服器出口", value: "3月 YoY +68%", impact: "bullish", note: "CoWoS、HBM 封測帶動廣達、緯穎" },
-      { label: "面板（AUO/群創）", value: "報價持平", impact: "neutral", note: "電視面板需求回穩，但 IT 面板偏弱" },
-      { label: "貿易戰衝擊", value: "關稅 13.7% 有效稅率", impact: "bearish", note: "部分客戶拉貨急單效應消退" },
-    ],
-  },
-  {
-    category: "利率 / 資金",
-    icon: "💰",
-    color: "#1d4ed8",
-    items: [
-      { label: "台灣 10Y 公債", value: "1.82%", impact: "neutral", note: "央行偏鴿，升息預期低" },
-      { label: "融資餘額", value: "3,420 億（-12億）", impact: "neutral", note: "散戶信心趨謹慎" },
-      { label: "三大法人", value: "外資+自營商同步買超", impact: "bullish", note: "投信逢高調節，壓力約 23,000 點" },
-    ],
-  },
-  {
-    category: "重點族群觀察",
-    icon: "🔍",
-    color: "#7c3aed",
-    items: [
-      { label: "AI / CoWoS", value: "台積電、日月光、精材", impact: "bullish", note: "AI 資本支出持續上修" },
-      { label: "航運", value: "長榮、陽明回穩", impact: "neutral", note: "停火後波灣航線重開，運費待觀察" },
-      { label: "電動車供應鏈", value: "承壓", impact: "bearish", note: "Tesla 交付遜預期，貿易戰衝擊出口" },
-      { label: "伺服器 / ODM", value: "廣達、緯穎、英業達", impact: "bullish", note: "北美 CSP 資本支出 Q2 持續上修" },
-    ],
-  },
-];
+function buildUsFactors(liveMarket) {
+  const extra = liveMarket?.extra || [];
+  const wti = findMetric(extra, "WTI 原油");
+  const gold = findMetric(extra, "黃金");
+  const treasury = findMetric(extra, "10Y 殖利率");
+
+  return [
+    {
+      category: "總經 / Fed",
+      icon: "🏦",
+      color: "#1d4ed8",
+      items: [
+        { label: "Fed 利率決策", value: "按兵不動（機率 98%）", impact: "neutral", note: "接下來仍以 CPI、PCE 與就業數據作為利率路徑觀察重點" },
+        { label: "10Y 殖利率", value: treasury?.value || "待更新", impact: "neutral", note: "長天期殖利率反映市場對成長、通膨與降息時程的再定價" },
+        { label: "Q4 GDP / PCE", value: "本週總經數據密集", impact: "neutral", note: "若通膨高於預期，科技股與高估值資產波動可能放大" },
+      ],
+    },
+    {
+      category: "地緣政治",
+      icon: "🌍",
+      color: "#b91c1c",
+      items: [
+        { label: "中東局勢", value: "持續影響油價與避險資產", impact: "bearish", note: "若衝突升級，能源、航運與股市風險偏好會同步受衝擊" },
+        { label: "中美貿易政策", value: "關稅與談判訊號反覆", impact: "bearish", note: "半導體、電動車與出口鏈最容易受到政策 headline 影響" },
+        { label: "全球風險偏好", value: "依能源與利率方向擺動", impact: "neutral", note: "市場情緒通常與油價、殖利率、美元強弱連動" },
+      ],
+    },
+    {
+      category: "能源 / 商品",
+      icon: "⛽",
+      color: "#166534",
+      items: [
+        { label: "WTI 原油", value: wti ? `${wti.value}（${wti.pct}）` : "待更新", impact: "neutral", note: "油價會直接影響航空、運輸、化工與通膨預期" },
+        { label: "黃金", value: gold ? `${gold.value}（${gold.pct}）` : "待更新", impact: "neutral", note: "黃金常反映避險需求與美元、實質利率變化" },
+        { label: "商品價格", value: "觀察油金與殖利率聯動", impact: "neutral", note: "商品波動會影響風險資產輪動與資金配置節奏" },
+      ],
+    },
+    {
+      category: "企業財報",
+      icon: "📊",
+      color: "#7c3aed",
+      items: [
+        { label: "財報季", value: "進入高密度公告期", impact: "neutral", note: "市場更在意指引、資本支出與 AI 需求是否延續" },
+        { label: "Mag 7 評價", value: "仍主導指數方向", impact: "neutral", note: "大型科技股只要財報或展望偏離預期，就會擴大大盤波動" },
+        { label: "景氣敏感股", value: "受油價與總經數據牽動", impact: "neutral", note: "航空、金融、工業與半導體容易同步反映市場風向" },
+      ],
+    },
+  ];
+}
+
+function buildTwFactors(liveTw) {
+  const taiexValue = liveTw?.taiex ? `${liveTw.taiex}（${liveTw.taiex_pct || "待更新"}）` : "待更新";
+  const usdTwdValue = liveTw?.usd_twd || "待更新";
+  const tsmAdrValue = liveTw?.tsm ? `${liveTw.tsm}（${liveTw.tsm_pct || "待更新"}）` : "待更新";
+
+  return [
+    {
+      category: "台股核心動能",
+      icon: "🇹🇼",
+      color: "#0f766e",
+      items: [
+        { label: "台股加權指數", value: taiexValue, impact: "neutral", note: "以當日即時資料為準，觀察權值股與金融股是否同步表態" },
+        { label: "TSM ADR", value: tsmAdrValue, impact: "bullish", note: "美股 ADR 走勢常是隔日台積電與半導體族群的重要先行指標" },
+        { label: "美元兌台幣", value: usdTwdValue, impact: "neutral", note: "匯率會影響外資流向，也會牽動出口股的獲利預期" },
+        { label: "外資動向", value: "觀察期現貨同步方向", impact: "neutral", note: "指數是否站穩通常仍取決於外資在權值股上的態度" },
+      ],
+    },
+    {
+      category: "供應鏈 / 出口",
+      icon: "🏭",
+      color: "#c2410c",
+      items: [
+        { label: "AI 伺服器鏈", value: "台積電 / 廣達 / 緯穎", impact: "bullish", note: "若北美 CSP 資本支出續強，AI 供應鏈仍是台股主軸" },
+        { label: "傳產 / 航運", value: "受油價與景氣預期影響", impact: "neutral", note: "能源與運價變化會直接影響航運、塑化與航空表現" },
+        { label: "出口需求", value: "觀察匯率與接單動能", impact: "neutral", note: "出口鏈需要同時觀察美元、終端需求與庫存調整節奏" },
+      ],
+    },
+    {
+      category: "利率 / 資金",
+      icon: "💰",
+      color: "#1d4ed8",
+      items: [
+        { label: "國際利率", value: "美債殖利率仍是主導變數", impact: "neutral", note: "美債走高通常壓抑評價，走低則有利成長股擴張估值" },
+        { label: "台股資金面", value: "留意成交量與融資變化", impact: "neutral", note: "若量能無法放大，指數容易在高檔震盪而非單邊上攻" },
+        { label: "三大法人", value: "外資 / 投信 / 自營商", impact: "neutral", note: "籌碼是否同向，往往決定短線盤勢延續力" },
+      ],
+    },
+    {
+      category: "重點族群觀察",
+      icon: "🔍",
+      color: "#7c3aed",
+      items: [
+        { label: "半導體", value: "AI 與先進製程仍是主線", impact: "bullish", note: "先進製程、CoWoS、HBM 相關概念股最受市場關注" },
+        { label: "ODM / 伺服器", value: "跟隨北美 AI 資本支出", impact: "bullish", note: "伺服器供應鏈受雲端資本支出與交貨節奏影響最大" },
+        { label: "電動車 / 傳產", value: "受全球景氣與政策波動", impact: "bearish", note: "若需求降溫或關稅升高，相關族群獲利預期會先被下修" },
+      ],
+    },
+  ];
+}
 
 // ─── 科技股 ─────────────────────────────────────────────────────────────────
 const techNews = [
@@ -502,8 +516,8 @@ export default function MorningBriefing() {
 
   const renderSection = () => {
     switch (active) {
-      case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} />;
-      case 1: return <MarketFactors twFocus={live.twStockFocus} twData={live.twData} />;
+      case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} hasLiveData={Boolean(firestoreData)} />;
+      case 1: return <MarketFactors twFocus={live.twStockFocus} twData={live.twData} market={liveMarket} />;
       case 2: return <TechStocks news={liveTechNews} />;
       case 3: return <IranWar />;
       case 4: return <TrumpWatch statements={liveTrumpStatements} />;
@@ -644,7 +658,7 @@ export default function MorningBriefing() {
 }
 
 // ─── 市場總覽 ─────────────────────────────────────────────────────────────────
-function MarketOverview({ market, summary, insight, risk }) {
+function MarketOverview({ market, summary, insight, risk, hasLiveData }) {
   const indices = market?.indices || marketData.indices;
   const extra = market?.extra || marketData.extra;
 
@@ -653,7 +667,7 @@ function MarketOverview({ market, summary, insight, risk }) {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 12 }}>📊 今日市場總結</div>
         <p style={{ fontSize: 14, lineHeight: 1.8, color: "#4d4c48", margin: 0 }}>
-          {summary || "川普 4/8 凌晨宣布與伊朗達成兩週停火，伊朗同意開放荷莫茲海峽，引爆全球風險資產大反彈。道瓊狂飆 1,200 點（+2.6%），S&P 500 漲 2.4%，納斯達克噴漲 2.8%。WTI 原油暴跌 17%，航空郵輪股全面飆漲。"}
+          {summary || (hasLiveData ? "最新摘要載入中。" : "目前無法取得即時摘要，以下區塊可能顯示示範內容，請以重新同步後的資料為準。")}
         </p>
       </Card>
 
@@ -703,9 +717,9 @@ function MarketOverview({ market, summary, insight, risk }) {
 }
 
 // ─── 美台股影響因素 ─────────────────────────────────────────────────────────
-function MarketFactors({ twFocus, twData: liveTw }) {
+function MarketFactors({ twFocus, twData: liveTw, market: liveMarket }) {
   const [tab, setTab] = useState("us");
-  const factors = tab === "us" ? usFactors : twFactors;
+  const factors = tab === "us" ? buildUsFactors(liveMarket) : buildTwFactors(liveTw);
 
   return (
     <div>
@@ -726,7 +740,7 @@ function MarketFactors({ twFocus, twData: liveTw }) {
         <Card style={{ background: "#eff6ff", borderColor: "#bfdbfe" }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#1d4ed8", marginBottom: 8 }}>📌 今日美股核心驅動</div>
           <p style={{ fontSize: 13, lineHeight: 1.7, color: "#4d4c48", margin: 0 }}>
-            停火協議為最大催化劑。Fed 利率決策維持觀望，CPI（4/10）為下一個關鍵風險事件。企業財報季拉開序幕，Mag 7 估值已修正至相對便宜水位。
+            美股方向仍主要由利率、能源價格、財報指引與地緣政治 headline 驅動。具體價位請以上方即時資料區塊為準。
           </p>
         </Card>
       )}
@@ -734,7 +748,7 @@ function MarketFactors({ twFocus, twData: liveTw }) {
         <Card style={{ background: "#f0fdfa", borderColor: "#99f6e4" }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#0f766e", marginBottom: 8 }}>📌 今日台股核心驅動</div>
           <p style={{ fontSize: 13, lineHeight: 1.7, color: "#4d4c48", margin: 0 }}>
-            台積電 AI 晶片需求持續為台股最強支撐。外資回補加上停火帶動的全球風險情緒回暖，壓力點在台幣升值與 23,000 點整數關卡。
+            台股仍以半導體、AI 供應鏈、匯率與外資籌碼為主軸。指數與匯率請以即時資料區塊顯示的最新數值為準。
           </p>
         </Card>
       )}
