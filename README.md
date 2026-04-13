@@ -17,15 +17,20 @@ This repo now includes a Firebase Hosting deployment workflow for the React fron
 - `.github/workflows/deploy-hosting.yml`
   - Deploys the frontend to Firebase Hosting on push to `master`
 
-### Required GitHub secret
+### Required GitHub secrets
 
+- `FIREBASE_HOSTING_SERVICE_ACCOUNT`
+  - JSON service account key for Firebase Hosting deployment
 - `FIREBASE_SERVICE_ACCOUNT`
-  - Must be a JSON service account key with permission to deploy Firebase Hosting
+  - JSON service account key used by the data update workflow to write Firestore data
 
 Recommended roles:
 
-- `Firebase Hosting Admin`
-- `Viewer`
+- For `FIREBASE_HOSTING_SERVICE_ACCOUNT`
+  - `Firebase Hosting Admin`
+  - `Firebase Viewer`
+- For `FIREBASE_SERVICE_ACCOUNT`
+  - Firestore write access suitable for `scripts/update_data.py`
 
 If the same service account is also used by `scripts/update_data.py`, it also needs Firestore access.
 
