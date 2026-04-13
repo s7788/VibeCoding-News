@@ -18,9 +18,36 @@ from datetime import datetime, timezone
 
 # ── 初始化 ────────────────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-# 使用 REST API 直接呼叫，不依賴 SDK 版本
-GEMINI_MODEL = "gemini-1.5-flash"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+def get_best_gemini_model():
+    """動態查詢 API key 可用的最佳 Flash 模型"""
+    try:
+        r = requests.get(f"{GEMINI_BASE}/models?key={GEMINI_API_KEY}", timeout=15)
+        r.raise_for_status()
+        models = r.json().get("models", [])
+        # 篩選支援 generateContent 的 flash 模型
+        flash = [
+            m["name"].replace("models/", "")
+            for m in models
+            if "flash" in m.get("name", "").lower()
+            and "generateContent" in m.get("supportedGenerationMethods", [])
+            and "thinking" not in m.get("name", "").lower()
+        ]
+        print(f"  可用 Flash 模型：{flash}")
+        # 優先順序：2.5 > 2.0 > 1.5 > 其他
+        for prefix in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash"]:
+            candidates = sorted([m for m in flash if m.startswith(prefix)], reverse=True)
+            if candidates:
+                return candidates[0]
+        return flash[0] if flash else "gemini-1.5-flash"
+    except Exception as e:
+        print(f"  模型查詢失敗，使用預設：{e}")
+        return "gemini-1.5-flash"
+
+GEMINI_MODEL = get_best_gemini_model()
+print(f"  使用模型：{GEMINI_MODEL}")
+GEMINI_URL = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 # Yahoo Finance 直接 HTTP（yfinance 在 CI 環境有 cookie 問題）
 YF_HEADERS = {
