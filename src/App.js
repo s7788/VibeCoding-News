@@ -73,16 +73,16 @@ const SECTIONS = [
 // ─── 市場數據 ─────────────────────────────────────────────────────────────────
 const marketData = {
   indices: [
-    { name: "道瓊工業", value: "47,785", change: "+1,200", pct: "+2.6%", prev: "46,584", weekly: "+2.8%", color: "#166534" },
-    { name: "納斯達克", value: "22,634", change: "+617", pct: "+2.8%", prev: "22,018", weekly: "+3.5%", color: "#166534" },
-    { name: "S&P 500", value: "6,773", change: "+157", pct: "+2.4%", prev: "6,617", weekly: "+2.9%", color: "#166534" },
-    { name: "比特幣", value: "$71,525", change: "+2,666", pct: "+3.9%", prev: "$68,859", weekly: "+6.5%", color: "#166534" },
+    { name: "道瓊工業", value: "待同步", change: "", pct: "--", prev: "-", weekly: "-", color: "#87867f" },
+    { name: "納斯達克", value: "待同步", change: "", pct: "--", prev: "-", weekly: "-", color: "#87867f" },
+    { name: "S&P 500", value: "待同步", change: "", pct: "--", prev: "-", weekly: "-", color: "#87867f" },
+    { name: "比特幣", value: "待同步", change: "", pct: "--", prev: "-", weekly: "-", color: "#87867f" },
   ],
   extra: [
-    { name: "WTI 原油", value: "$93.42", pct: "-17.0%" },
-    { name: "布蘭特原油", value: "$91.65", pct: "-16.0%" },
-    { name: "黃金", value: "$4,804", pct: "+2.2%" },
-    { name: "10Y 殖利率", value: "4.24%", pct: "-5bp" },
+    { name: "WTI 原油", value: "待同步", pct: "--" },
+    { name: "布蘭特原油", value: "待同步", pct: "--" },
+    { name: "黃金", value: "待同步", pct: "--" },
+    { name: "10Y 殖利率", value: "待同步", pct: "--" },
   ],
 };
 
@@ -519,7 +519,7 @@ export default function MorningBriefing() {
       case 0: return <MarketOverview market={liveMarket} summary={live.marketSummary} insight={live.marketInsight} risk={live.topRisk} hasLiveData={Boolean(firestoreData)} />;
       case 1: return <MarketFactors twFocus={live.twStockFocus} twData={live.twData} market={liveMarket} />;
       case 2: return <TechStocks news={liveTechNews} />;
-      case 3: return <IranWar />;
+      case 3: return <IranWar market={liveMarket} />;
       case 4: return <TrumpWatch statements={liveTrumpStatements} />;
       case 5: return <AIFrontier liveUpdates={liveAiUpdates} />;
       case 6: return <GitHubTrending />;
@@ -821,13 +821,18 @@ function TechStocks({ news }) {
 }
 
 // ─── 美伊戰爭 ────────────────────────────────────────────────────────────────
-function IranWar() {
+function IranWar({ market }) {
+  const extra = market?.extra || marketData.extra;
+  const wti = findMetric(extra, "WTI 原油");
+  const brent = findMetric(extra, "布蘭特原油");
+  const gold = findMetric(extra, "黃金");
+
   return (
     <div>
       <Card style={{ background: "#fef2f2", borderColor: "#e8c4bc" }}>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>🕊️ 停火協議達成（第 40 天）</div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>🌍 中東局勢觀察</div>
         <p style={{ fontSize: 13, lineHeight: 1.7, color: "#4d4c48", margin: 0 }}>
-          川普 4/8 宣布暫停攻擊伊朗兩週，稱已收到伊朗 10 點方案為「可行談判基礎」。伊朗同意在停火期間開放荷莫茲海峽。以色列也同意停火，但繼續在黎巴嫩的行動。VP Vance 警告稱此為「脆弱的休戰」。
+          本區塊用來整理中東情勢對油價、航運、黃金與風險偏好的影響。若上方即時商品價格已更新，請以 live market 區塊為準，不採用固定歷史價位。
         </p>
       </Card>
 
@@ -845,11 +850,14 @@ function IranWar() {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>⛽ 能源市場劇變</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          {[{ label: "WTI 原油", val: "$93.42", chg: "-17.0%" }, { label: "布蘭特原油", val: "$91.65", chg: "-16.0%" }].map((o, i) => (
+          {[
+            { label: "WTI 原油", val: wti?.value || "待同步", chg: wti?.pct || "--" },
+            { label: "布蘭特原油", val: brent?.value || "待同步", chg: brent?.pct || "--" },
+          ].map((o, i) => (
             <div key={i} style={{ padding: 12, borderRadius: 10, background: "#fef3ec" }}>
               <div style={{ fontSize: 11, color: "#87867f" }}>{o.label}</div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: "#166534" }}>{o.val}</div>
-              <div style={{ fontSize: 12, color: "#166534" }}>{o.chg}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace", color: "#141413" }}>{o.val}</div>
+              <div style={{ fontSize: 12, color: o.chg.includes("+") ? "#166534" : o.chg.includes("-") ? "#b91c1c" : "#87867f" }}>{o.chg}</div>
             </div>
           ))}
         </div>
@@ -858,7 +866,7 @@ function IranWar() {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>🕊️ 停火進展與風險</div>
         <p style={{ fontSize: 13, lineHeight: 1.7, color: "#5e5d59", margin: 0 }}>
-          Evercore ISI 警告「兩週停火不等於和平解決」。Lloyd's 保險市場表示波斯灣貿易不太可能立即恢復正常。黃金仍在上漲（+2.2%），顯示避險情緒並未完全消退。
+          地緣政治 headline 往往先反映在能源與避險資產。{gold ? `目前黃金為 ${gold.value}（${gold.pct}）` : "黃金與油價待同步"}，可用來觀察避險需求是否升溫。
         </p>
       </Card>
     </div>
