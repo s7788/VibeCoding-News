@@ -983,12 +983,20 @@ const AI_COMPANY_KEY_MAP = {
   codex: "OpenAI Codex",
 };
 
+const AI_COMPANY_DEFAULTS_BY_KEY = {
+  claude: aiCompanyUpdates.find((item) => item.company === AI_COMPANY_KEY_MAP.claude),
+  openai: aiCompanyUpdates.find((item) => item.company === AI_COMPANY_KEY_MAP.openai),
+  google: aiCompanyUpdates.find((item) => item.company === AI_COMPANY_KEY_MAP.google),
+  copilot: aiCompanyUpdates.find((item) => item.company === AI_COMPANY_KEY_MAP.copilot),
+  codex: aiCompanyUpdates.find((item) => item.company === AI_COMPANY_KEY_MAP.codex),
+};
+
 function AIFrontier({ liveUpdates, companyUpdates, articles }) {
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const companyDefaults = Object.fromEntries(aiCompanyUpdates.map((item) => [item.company, item]));
   const companies = (companyUpdates || aiCompanyUpdates).map((item) => ({
-    ...(companyDefaults[item.company] || {}),
+    ...(AI_COMPANY_DEFAULTS_BY_KEY[item.key] || {}),
     ...item,
+    company: item.company || AI_COMPANY_KEY_MAP[item.key] || item.company,
     updates: item.updates || [],
   }));
   const readingList = articles || aiArticles;
@@ -1005,8 +1013,7 @@ function AIFrontier({ liveUpdates, companyUpdates, articles }) {
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginBottom: 12 }}>📡 各家 AI 最新動態</div>
 
       {companies.map((company, ci) => {
-        // 找出此公司對應的 liveUpdates key
-        const liveKey = Object.entries(AI_COMPANY_KEY_MAP).find(([, v]) => v === company.company)?.[0];
+        const liveKey = company.key || Object.entries(AI_COMPANY_KEY_MAP).find(([, v]) => v === company.company)?.[0];
         const liveText = liveUpdates?.[liveKey];
         return (
           <Card key={ci} style={{ background: company.bgColor, borderColor: company.color + "30" }}>

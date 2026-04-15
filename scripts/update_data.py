@@ -324,6 +324,14 @@ def fetch_github_trending(limit=10):
     return repos
 
 
+def safe_fetch_github_trending(limit=10):
+    try:
+        return fetch_github_trending(limit=limit)
+    except Exception as exc:
+        print(f"  ✗ GitHub Trending 取得失敗，改以空陣列繼續：{exc}")
+        return []
+
+
 # ── OpenAI 生成摘要 ───────────────────────────────────────────────────────────
 def openai_chat_json(system_prompt, user_prompt):
     payload = {
@@ -511,7 +519,7 @@ def main():
     ai_news = fetch_ai_company_news()
 
     print("\n📈 [5/6] 抓取 GitHub Trending...")
-    github_repos = fetch_github_trending(limit=10)
+    github_repos = safe_fetch_github_trending(limit=10)
 
     print("\n🤖 [6/6] OpenAI 生成摘要...")
     ai_content = generate_with_openai(
