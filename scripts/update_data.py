@@ -1,90 +1,41 @@
 """
 全球市場日報 — 自動更新腳本
 排程：台灣時間 08:00 / 16:00 / 21:00
-數據來源：Yahoo Finance v8 API + RSS 財經新聞
-AI 摘要：Gemini 2.5 Flash
+數據來源：Yahoo Finance v8 API + RSS 財經新聞 + GitHub Trending
+AI 摘要：OpenAI GPT-5.4-nano
 儲存：Firestore briefings/latest
 """
 
-import os
+import html
 import json
+import os
+import re
 import time
 import traceback
-import feedparser
-import requests
-import firebase_admin
-from firebase_admin import credentials, firestore
+import urllib.parse
 from datetime import datetime, timezone
 
+import feedparser
+import firebase_admin
+import requests
+from firebase_admin import credentials, firestore
+
 # ── 初始化 ────────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
-
-def get_best_gemini_model():
-    """動態查詢 API key 可用的最佳 Flash 模型"""
-    try:
-        r = requests.get(f"{GEMINI_BASE}/models?key={GEMINI_API_KEY}", timeout=15)
-        r.raise_for_status()
-        models = r.json().get("models", [])
-        # 篩選支援 generateContent 的 flash 模型
-        EXCLUDE = ("tts", "image", "thinking", "audio", "vision")
-        flash = [
-            m["name"].replace("models/", "")
-            for m in models
-            if "flash" in m.get("name", "").lower()
-            and "generateContent" in m.get("supportedGenerationMethods", [])
-            and not any(kw in m.get("name", "").lower() for kw in EXCLUDE)
-        ]
-        print(f"  可用 Flash 模型：{flash}")
-        # 優先順序：3.x > 2.5 > 2.0 > 其他（不帶 preview/lite 優先）
-        for prefix in ["gemini-3-flash", "gemini-3.1-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-flash"]:
-            # 非 preview/lite 版優先
-            stable = [m for m in flash if m.startswith(prefix) and "preview" not in m and "lite" not in m]
-            if stable:
-                return sorted(stable, reverse=True)[0]
-            # 再找 preview 版
-            previews = [m for m in flash if m.startswith(prefix)]
-            if previews:
-                return sorted(previews, reverse=True)[0]
-        return flash[0] if flash else "gemini-2.0-flash"
-    except Exception as e:
-        print(f"  模型查詢失敗，使用預設：{e}")
-        return "gemini-1.5-flash"
-
-GEMINI_MODEL = get_best_gemini_model()
-print(f"  使用模型：{GEMINI_MODEL}")
-GEMINI_URL = f"{GEMINI_BASE}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-
-# Yahoo Finance 直接 HTTP（yfinance 在 CI 環境有 cookie 問題）
-YF_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-
-def yf_history(symbol, range_="7d", interval="1d"):
-    """Yahoo Finance v8 API 直接呼叫，繞過 yfinance cookie 限制"""
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-    params = {"interval": interval, "range": range_, "includeAdjustedClose": True}
-    for attempt in range(3):
-        try:
-            r = requests.get(url, params=params, headers=YF_HEADERS, timeout=15)
-            data = r.json()
-            result = data["chart"]["result"][0]
-            closes = (
-                result["indicators"].get("adjclose", [{}])[0].get("adjclose")
-                or result["indicators"]["quote"][0]["close"]
-            )
-            closes = [c for c in closes if c is not None]
-            return closes
-        except Exception as e:
-            print(f"    retry {attempt+1}/3 {symbol}: {e}")
-            time.sleep(2)
-    return []
+OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
+OPENAI_MODEL = "gpt-5.4-nano"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 
 cred = credentials.Certificate(json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"]))
 firebase_admin.initialize_app(cred)
 db = firestore.client()
+
+COMMON_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 # ── 美股市場數據 ──────────────────────────────────────────────────────────────
 US_TICKERS = {
@@ -101,6 +52,62 @@ EXTRA_TICKERS = {
     "10Y 殖利率": ("^TNX", "", True),
 }
 
+AI_NEWS_QUERIES = {
+    "claude": "Anthropic OR Claude AI when:14d",
+    "openai": "OpenAI OR ChatGPT OR GPT-5 when:14d",
+    "google": "Google Gemini OR DeepMind when:14d",
+    "copilot": "Microsoft Copilot OR GitHub Copilot when:14d",
+    "codex": "OpenAI Codex OR AI coding agent OR Cursor OR Windsurf when:14d",
+}
+
+TRUMP_QUERY = "Trump tariffs OR Trump trade OR Trump policy OR Trump Truth Social when:30d"
+
+
+def fetch_json(url, params=None, headers=None, timeout=20):
+    merged_headers = {**COMMON_HEADERS, **(headers or {})}
+    response = requests.get(url, params=params, headers=merged_headers, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def strip_html(raw_text):
+    if not raw_text:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", raw_text)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def compact_number(num_str):
+    if not num_str:
+        return None
+    value = int(num_str.replace(",", ""))
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.1f}k"
+    return str(value)
+
+
+def yf_history(symbol, range_="7d", interval="1d"):
+    """Yahoo Finance v8 API 直接呼叫，繞過 yfinance cookie 限制"""
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {"interval": interval, "range": range_, "includeAdjustedClose": True}
+    for attempt in range(3):
+        try:
+            data = fetch_json(url, params=params, timeout=15)
+            result = data["chart"]["result"][0]
+            closes = (
+                result["indicators"].get("adjclose", [{}])[0].get("adjclose")
+                or result["indicators"]["quote"][0]["close"]
+            )
+            closes = [c for c in closes if c is not None]
+            return closes
+        except Exception as exc:
+            print(f"    retry {attempt + 1}/3 {symbol}: {exc}")
+            time.sleep(2)
+    return []
+
+
 def fmt_price(val, prefix="$", is_rate=False):
     if is_rate:
         return f"{val:.2f}%"
@@ -109,6 +116,7 @@ def fmt_price(val, prefix="$", is_rate=False):
     if val >= 100:
         return f"{prefix}{val:,.2f}"
     return f"{prefix}{val:.2f}"
+
 
 def fetch_market_data():
     indices = []
@@ -123,18 +131,20 @@ def fetch_market_data():
             pct = (change / prev) * 100
             weekly = ((curr - week_start) / week_start) * 100
             prefix = "$" if "BTC" in symbol else ""
-            indices.append({
-                "name": name,
-                "value": fmt_price(curr, prefix),
-                "change": f"{'+' if change >= 0 else ''}{change:,.0f}",
-                "pct": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
-                "prev": fmt_price(prev, prefix),
-                "weekly": f"{'+' if weekly >= 0 else ''}{weekly:.1f}%",
-                "color": "#166534" if pct >= 0 else "#b91c1c",
-            })
+            indices.append(
+                {
+                    "name": name,
+                    "value": fmt_price(curr, prefix),
+                    "change": f"{'+' if change >= 0 else ''}{change:,.0f}",
+                    "pct": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
+                    "prev": fmt_price(prev, prefix),
+                    "weekly": f"{'+' if weekly >= 0 else ''}{weekly:.1f}%",
+                    "color": "#166534" if pct >= 0 else "#b91c1c",
+                }
+            )
             print(f"  ✓ {name}: {fmt_price(curr, prefix)} ({pct:+.1f}%)")
-        except Exception as e:
-            print(f"  ✗ {name}: {e}")
+        except Exception as exc:
+            print(f"  ✗ {name}: {exc}")
 
     extra = []
     for name, (symbol, prefix, is_rate) in EXTRA_TICKERS.items():
@@ -144,18 +154,20 @@ def fetch_market_data():
                 continue
             curr, prev = closes[-1], closes[-2]
             pct = ((curr - prev) / prev) * 100
-            extra.append({
-                "name": name,
-                "value": fmt_price(curr, prefix, is_rate),
-                "pct": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
-            })
+            extra.append(
+                {
+                    "name": name,
+                    "value": fmt_price(curr, prefix, is_rate),
+                    "pct": f"{'+' if pct >= 0 else ''}{pct:.1f}%",
+                }
+            )
             print(f"  ✓ {name}: {fmt_price(curr, prefix, is_rate)} ({pct:+.1f}%)")
-        except Exception as e:
-            print(f"  ✗ {name}: {e}")
+        except Exception as exc:
+            print(f"  ✗ {name}: {exc}")
 
     return {"indices": indices, "extra": extra}
 
-# ── 台股數據 ──────────────────────────────────────────────────────────────────
+
 def fetch_tw_market():
     result = {}
     try:
@@ -167,8 +179,8 @@ def fetch_tw_market():
             result["taiex_pct"] = f"{'+' if pct >= 0 else ''}{pct:.1f}%"
             result["taiex_color"] = "#166534" if pct >= 0 else "#b91c1c"
             print(f"  ✓ 台股加權：{curr:,.0f} ({pct:+.1f}%)")
-    except Exception as e:
-        print(f"  ✗ 台股：{e}")
+    except Exception as exc:
+        print(f"  ✗ 台股：{exc}")
 
     try:
         closes = yf_history("TWD=X", range_="5d")
@@ -190,7 +202,8 @@ def fetch_tw_market():
 
     return result
 
-# ── RSS 財經新聞 ──────────────────────────────────────────────────────────────
+
+# ── 新聞來源 ──────────────────────────────────────────────────────────────────
 RSS_FEEDS = [
     ("Reuters Business", "https://feeds.reuters.com/reuters/businessNews"),
     ("Reuters Tech", "https://feeds.reuters.com/reuters/technologyNews"),
@@ -200,113 +213,260 @@ RSS_FEEDS = [
     ("Seeking Alpha", "https://seekingalpha.com/market_currents.xml"),
 ]
 
+
+def normalize_feed_entry(source, entry):
+    return {
+        "source": source,
+        "title": entry.get("title", "").strip(),
+        "summary": strip_html(entry.get("summary", ""))[:320],
+        "link": entry.get("link", ""),
+        "published": entry.get("published", ""),
+    }
+
+
 def fetch_news():
     headlines = []
     for source, url in RSS_FEEDS:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:6]:
-                title = entry.get("title", "").strip()
-                summary = entry.get("summary", "").strip()[:300]
-                if title:
-                    headlines.append({
-                        "source": source,
-                        "title": title,
-                        "summary": summary,
-                        "published": entry.get("published", ""),
-                    })
-            print(f"  ✓ {source}: {len(feed.entries[:6])} 篇")
-        except Exception as e:
-            print(f"  ✗ {source}: {e}")
+            entries = [normalize_feed_entry(source, entry) for entry in feed.entries[:6] if entry.get("title")]
+            headlines.extend(entries)
+            print(f"  ✓ {source}: {len(entries)} 篇")
+        except Exception as exc:
+            print(f"  ✗ {source}: {exc}")
     return headlines[:30]
 
-# ── Gemini AI 生成摘要 ────────────────────────────────────────────────────────
-def generate_with_gemini(market_data, tw_data, headlines):
+
+def fetch_google_news(query, max_items=12):
+    encoded = urllib.parse.quote_plus(query)
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
+    feed = feedparser.parse(url)
+    items = []
+    for entry in feed.entries[:max_items]:
+        if not entry.get("title"):
+            continue
+        items.append(
+            {
+                "source": entry.get("source", {}).get("title", "Google News"),
+                "title": entry.get("title", "").strip(),
+                "summary": strip_html(entry.get("summary", ""))[:320],
+                "link": entry.get("link", ""),
+                "published": entry.get("published", ""),
+            }
+        )
+    return items
+
+
+def fetch_ai_company_news():
+    result = {}
+    for key, query in AI_NEWS_QUERIES.items():
+        try:
+            items = fetch_google_news(query, max_items=6)
+            result[key] = items
+            print(f"  ✓ AI news {key}: {len(items)} 篇")
+        except Exception as exc:
+            print(f"  ✗ AI news {key}: {exc}")
+            result[key] = []
+    return result
+
+
+def fetch_trump_news():
+    try:
+        items = fetch_google_news(TRUMP_QUERY, max_items=16)
+        print(f"  ✓ Trump news: {len(items)} 篇")
+        return items
+    except Exception as exc:
+        print(f"  ✗ Trump news: {exc}")
+        return []
+
+
+def fetch_github_trending(limit=10):
+    response = requests.get("https://github.com/trending", headers=COMMON_HEADERS, timeout=20)
+    response.raise_for_status()
+    html_text = response.text
+    articles = re.findall(r'<article class="Box-row">(.*?)</article>', html_text, re.S)
+    repos = []
+
+    for rank, block in enumerate(articles[:limit], start=1):
+        name_match = re.search(
+            r'<h2 class="h3 lh-condensed">.*?<a[^>]*href="/([^"/]+/[^"/]+)"',
+            block,
+            re.S,
+        )
+        if not name_match:
+            continue
+
+        name = html.unescape(name_match.group(1).strip())
+        desc_match = re.search(
+            r'<p class="col-9 color-fg-muted my-1 (?:pr-4|tmp-pr-4)">(.*?)</p>',
+            block,
+            re.S,
+        )
+        lang_match = re.search(r'itemprop="programmingLanguage">\s*([^<]+)\s*</span>', block, re.S)
+        stars_match = re.search(rf'href="/{re.escape(name)}/stargazers"[^>]*>\s*.*?</svg>\s*([\d,]+)\s*</a>', block, re.S)
+        forks_match = re.search(rf'href="/{re.escape(name)}/forks"[^>]*>\s*.*?</svg>\s*([\d,]+)\s*</a>', block, re.S)
+        stars_today_match = re.search(r'([\d,]+)\s+stars today', block, re.S)
+
+        repos.append(
+            {
+                "rank": rank,
+                "name": name,
+                "url": f"https://github.com/{name}",
+                "lang": lang_match.group(1).strip() if lang_match else None,
+                "stars": compact_number(stars_match.group(1)) if stars_match else None,
+                "forks": compact_number(forks_match.group(1)) if forks_match else None,
+                "starsToday": compact_number(stars_today_match.group(1)) if stars_today_match else None,
+                "desc": strip_html(desc_match.group(1)) if desc_match else "",
+            }
+        )
+
+    print(f"  ✓ GitHub Trending: {len(repos)} 個 repo")
+    return repos
+
+
+# ── OpenAI 生成摘要 ───────────────────────────────────────────────────────────
+def openai_chat_json(system_prompt, user_prompt):
+    payload = {
+        "model": OPENAI_MODEL,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.3,
+    }
+
+    response = requests.post(
+        OPENAI_URL,
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=90,
+    )
+    response.raise_for_status()
+    text = response.json()["choices"][0]["message"]["content"]
+    return json.loads(text)
+
+
+def generate_with_openai(market_data, tw_data, headlines, trump_news, ai_news, github_repos):
     now_utc = datetime.now(timezone.utc)
     tw_hour = (now_utc.hour + 8) % 24
     session_label = "早盤" if tw_hour < 12 else ("午盤" if tw_hour < 17 else "盤後")
     date_str = now_utc.strftime("%Y/%m/%d")
 
-    headlines_text = "\n".join(
-        f"- [{h['source']}] {h['title']}"
-        for h in headlines
+    system_prompt = (
+        "你是一位頂尖的華爾街財經分析師與科技新聞編輯，專門為台灣投資人產出結構化日報。"
+        "你必須只根據提供的資料輸出有效 JSON，不要輸出 markdown。"
     )
 
-    market_json = json.dumps(market_data, ensure_ascii=False)
-    tw_json = json.dumps(tw_data, ensure_ascii=False)
-
-    prompt = f"""你是一位頂尖的華爾街財經分析師，專門為台灣投資人撰寫市場報告。
-今天是 {date_str}，台灣時間 {session_label}。
+    user_prompt = f"""今天是 {date_str}，台灣時間 {session_label}。
 
 【美股實時數據】
-{market_json}
+{json.dumps(market_data, ensure_ascii=False)}
 
 【台股數據】
-{tw_json}
+{json.dumps(tw_data, ensure_ascii=False)}
 
-【今日重要新聞標題（英文原文）】
-{headlines_text}
+【今日重要財經新聞】
+{json.dumps(headlines, ensure_ascii=False)}
 
-請根據以上數據生成完整的市場日報，以純 JSON 格式回傳（不要有 markdown 格式）：
+【川普近 30 天相關新聞】
+{json.dumps(trump_news, ensure_ascii=False)}
 
+【AI 公司近 14 天新聞】
+{json.dumps(ai_news, ensure_ascii=False)}
+
+【GitHub Trending】
+{json.dumps(github_repos, ensure_ascii=False)}
+
+請輸出一個 JSON 物件，欄位如下：
 {{
-  "marketSummary": "200字以內的今日市場總結，使用繁體中文，包含最重要的市場動態與驅動因素",
+  "marketSummary": "200字以內繁體中文市場總結",
   "techNews": [
     {{
-      "ticker": "股票代碼（NVDA/TSLA/AAPL/MSFT/GOOGL/AMZN/META 擇一）",
-      "title": "繁體中文新聞標題，約15-20字",
-      "detail": "100字繁體中文詳細說明，包含具體數字與分析",
+      "ticker": "股票代碼",
+      "title": "15-20字繁中標題",
+      "detail": "100字內繁中說明",
       "tags": ["標籤1", "標籤2", "標籤3"],
       "sentiment": "bullish 或 bearish"
     }}
   ],
   "trumpStatements": [
     {{
-      "date": "日期（如 4/8）",
-      "platform": "Truth Social 或 白宮記者會 或 Fox News",
-      "type": "類型（如：停火宣告/關稅警告/制裁宣告/政策發布）",
-      "color": "#166534（利多）或 #b91c1c（警告/威脅）或 #1d4ed8（政策）或 #7c3aed（其他）",
-      "quote": "英文原文引述或中文摘要（約30字）",
-      "impact": "對市場或特定資產的影響描述"
+      "date": "M/D",
+      "platform": "消息來源平台或媒體",
+      "type": "類型",
+      "color": "#166534 或 #b91c1c 或 #1d4ed8 或 #7c3aed",
+      "quote": "英文原文短句或繁中摘要",
+      "impact": "市場影響"
     }}
   ],
   "aiUpdates": {{
-    "claude": "Anthropic Claude 最新動態，約50字繁體中文",
-    "openai": "OpenAI 最新動態，約50字繁體中文",
-    "google": "Google Gemini/DeepMind 最新動態，約50字繁體中文",
-    "copilot": "Microsoft Copilot/GitHub 最新動態，約50字繁體中文",
-    "codex": "OpenAI Codex 或程式碼 AI 工具最新動態，約50字繁體中文"
+    "claude": "50字內摘要",
+    "openai": "50字內摘要",
+    "google": "50字內摘要",
+    "copilot": "50字內摘要",
+    "codex": "50字內摘要"
   }},
-  "marketInsight": "100字市場洞察，包含今日操作建議與風險提示，使用繁體中文",
-  "twStockFocus": "台股今日重點：包含加權指數走勢、外資動向、重點族群（半導體/AI/航運等），約100字繁體中文",
-  "topRisk": "今日最大尾部風險，約30字繁體中文"
+  "aiCompanyUpdates": [
+    {{
+      "key": "claude/openai/google/copilot/codex",
+      "company": "公司名稱",
+      "model": "模型或產品名",
+      "updates": [
+        {{
+          "date": "M/D",
+          "type": "模型更新/產品更新/研究發布/企業動態/開發工具",
+          "title": "繁中標題",
+          "desc": "80字內繁中說明"
+        }}
+      ]
+    }}
+  ],
+  "aiArticles": [
+    {{
+      "title": "繁中標題",
+      "source": "來源",
+      "summary": "80字內繁中摘要"
+    }}
+  ],
+  "githubRepos": [
+    {{
+      "rank": 1,
+      "name": "owner/repo",
+      "url": "https://github.com/owner/repo",
+      "lang": "語言或 null",
+      "stars": "原樣保留輸入格式",
+      "forks": "原樣保留輸入格式",
+      "starsToday": "原樣保留輸入格式",
+      "desc": "繁中描述",
+      "tags": ["2個以內短標籤"],
+      "isNew": true,
+      "hot": true
+    }}
+  ],
+  "githubTrendSummary": ["3-4條繁中趨勢觀察"],
+  "marketInsight": "100字內繁中市場洞察",
+  "twStockFocus": "100字內繁中台股重點",
+  "topRisk": "30字內繁中尾部風險"
 }}
 
 規則：
-1. 全部使用繁體中文（英文股票代碼、人名、機構名保留英文）
-2. techNews 生成 3-4 筆，只包含今日新聞中有提及的股票
-3. trumpStatements 生成 2-4 筆，如新聞中無川普相關消息則返回空陣列
-4. aiUpdates 若新聞中無特定公司消息，填入「暫無最新消息，維持現有服務」
-5. 所有數字需具體，不要使用模糊描述
-6. 直接回傳 JSON，絕對不要包在 ```json ``` 中"""
+1. 全部使用繁體中文，英文股票代碼、repo 名稱、產品名可以保留英文。
+2. trumpStatements 只保留近 30 天內資訊，按時間新到舊排列，輸出 5-10 筆。
+3. aiCompanyUpdates 要依照輸入新聞生成，不要寫死舊消息；若某家公司近 14 天沒有可靠更新，updates 可為空陣列，aiUpdates 對應欄位寫「近 14 天無明確重大更新」。
+4. githubRepos 必須以輸入的 Trending repo 為準，不能杜撰 repo；desc 與 tags 可重新整理成繁中。
+5. techNews 只挑今天資料中真的出現的股票，輸出 3-4 筆。
+6. 若某欄缺資料，請輸出空陣列或中性描述，不要捏造具體數值。
+7. 直接輸出 JSON。"""
 
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 4096},
-    }
-    r = requests.post(GEMINI_URL, json=payload, timeout=90)
-    r.raise_for_status()
-    text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return openai_chat_json(system_prompt, user_prompt)
 
-    # 清理可能的 markdown 包裝
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-
-    return json.loads(text)
 
 # ── 寫入 Firestore ────────────────────────────────────────────────────────────
-def save_to_firestore(payload: dict):
+def save_to_firestore(payload):
     now = datetime.now(timezone.utc)
     tw_hour = (now.hour + 8) % 24
     session = "morning" if tw_hour < 12 else ("afternoon" if tw_hour < 17 else "evening")
@@ -319,35 +479,49 @@ def save_to_firestore(payload: dict):
         "date": date_str,
     }
 
-    # 最新快照（前端讀取此文件）
     db.collection("briefings").document("latest").set(doc)
-    print(f"  ✓ 寫入 briefings/latest")
+    print("  ✓ 寫入 briefings/latest")
 
-    # 歷史存檔
     history_id = f"{date_str}-{session}"
     db.collection("briefings").document(history_id).set(doc)
     print(f"  ✓ 寫入 briefings/{history_id}")
 
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 def main():
     now_tw = datetime.now(timezone.utc).hour + 8
-    print(f"\n{'='*50}")
-    print(f"🚀 全球市場日報更新開始")
+    print(f"\n{'=' * 50}")
+    print("🚀 全球市場日報更新開始")
     print(f"   台灣時間：{now_tw % 24:02d}:00")
-    print(f"{'='*50}\n")
+    print(f"   AI 模型：{OPENAI_MODEL}")
+    print(f"{'=' * 50}\n")
 
-    print("📊 [1/4] 抓取美股數據...")
+    print("📊 [1/6] 抓取美股數據...")
     market_data = fetch_market_data()
 
-    print("\n🇹🇼 [2/4] 抓取台股數據...")
+    print("\n🇹🇼 [2/6] 抓取台股數據...")
     tw_data = fetch_tw_market()
 
-    print("\n📰 [3/4] 抓取財經新聞...")
+    print("\n📰 [3/6] 抓取財經新聞...")
     headlines = fetch_news()
     print(f"   共 {len(headlines)} 篇新聞")
 
-    print("\n🤖 [4/4] Gemini 生成摘要...")
-    ai_content = generate_with_gemini(market_data, tw_data, headlines)
+    print("\n🗞️ [4/6] 抓取川普 / AI 主題新聞...")
+    trump_news = fetch_trump_news()
+    ai_news = fetch_ai_company_news()
+
+    print("\n📈 [5/6] 抓取 GitHub Trending...")
+    github_repos = fetch_github_trending(limit=10)
+
+    print("\n🤖 [6/6] OpenAI 生成摘要...")
+    ai_content = generate_with_openai(
+        market_data=market_data,
+        tw_data=tw_data,
+        headlines=headlines,
+        trump_news=trump_news,
+        ai_news=ai_news,
+        github_repos=github_repos,
+    )
     print("  ✓ AI 摘要生成完成")
 
     combined = {
@@ -359,7 +533,7 @@ def main():
     print("\n💾 寫入 Firestore...")
     save_to_firestore(combined)
 
-    print(f"\n✅ 更新完成！")
+    print("\n✅ 更新完成！")
 
 
 if __name__ == "__main__":

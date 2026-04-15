@@ -19,6 +19,9 @@ This repo now includes a Firebase Hosting deployment workflow for the React fron
 
 ### Required GitHub secrets
 
+- `OPENAI_API_KEY`
+  - API key used by `.github/workflows/update-news.yml`
+  - The update workflow now generates structured briefing content with `gpt-5.4-nano`
 - `FIREBASE_HOSTING_SERVICE_ACCOUNT`
   - JSON service account key for Firebase Hosting deployment
 - `FIREBASE_SERVICE_ACCOUNT`
