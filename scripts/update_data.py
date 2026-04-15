@@ -332,6 +332,38 @@ def safe_fetch_github_trending(limit=10):
         return []
 
 
+def merge_github_repos(base_repos, ai_repos):
+    annotations_by_name = {
+        item.get("name"): item
+        for item in (ai_repos or [])
+        if item.get("name")
+    }
+
+    merged = []
+    for repo in base_repos:
+        annotation = annotations_by_name.get(repo["name"], {})
+        merged.append(
+            {
+                "rank": repo["rank"],
+                "name": repo["name"],
+                "url": repo["url"],
+                "lang": repo.get("lang"),
+                "stars": repo.get("stars"),
+                "forks": repo.get("forks"),
+                "starsToday": repo.get("starsToday"),
+                "desc": annotation.get("desc") or repo.get("desc", ""),
+                "tags": annotation.get("tags") or [],
+                "isNew": annotation.get("isNew", False),
+                "hot": annotation.get("hot", repo["rank"] <= 3),
+            }
+        )
+    return merged
+
+
+def sanitize_branch_name(branch_name):
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", branch_name).strip("-").lower() or "unknown"
+
+
 # ── OpenAI 生成摘要 ───────────────────────────────────────────────────────────
 def openai_chat_json(system_prompt, user_prompt):
     payload = {
@@ -474,7 +506,7 @@ def generate_with_openai(market_data, tw_data, headlines, trump_news, ai_news, g
 
 
 # ── 寫入 Firestore ────────────────────────────────────────────────────────────
-def save_to_firestore(payload):
+def save_to_firestore(payload, branch_name=None):
     now = datetime.now(timezone.utc)
     tw_hour = (now.hour + 8) % 24
     session = "morning" if tw_hour < 12 else ("afternoon" if tw_hour < 17 else "evening")
@@ -487,6 +519,13 @@ def save_to_firestore(payload):
         "date": date_str,
     }
 
+    if branch_name and branch_name not in {"master", "main"}:
+        preview_id = sanitize_branch_name(branch_name)
+        doc["sourceBranch"] = branch_name
+        db.collection("briefings_preview").document(preview_id).set(doc)
+        print(f"  ✓ 寫入 briefings_preview/{preview_id}")
+        return
+
     db.collection("briefings").document("latest").set(doc)
     print("  ✓ 寫入 briefings/latest")
 
@@ -498,10 +537,13 @@ def save_to_firestore(payload):
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 def main():
     now_tw = datetime.now(timezone.utc).hour + 8
+    branch_name = os.environ.get("GITHUB_REF_NAME") or os.environ.get("GITHUB_HEAD_REF") or ""
     print(f"\n{'=' * 50}")
     print("🚀 全球市場日報更新開始")
     print(f"   台灣時間：{now_tw % 24:02d}:00")
     print(f"   AI 模型：{OPENAI_MODEL}")
+    if branch_name:
+        print(f"   分支：{branch_name}")
     print(f"{'=' * 50}\n")
 
     print("📊 [1/6] 抓取美股數據...")
@@ -537,9 +579,10 @@ def main():
         "twData": tw_data,
         **ai_content,
     }
+    combined["githubRepos"] = merge_github_repos(github_repos, ai_content.get("githubRepos"))
 
     print("\n💾 寫入 Firestore...")
-    save_to_firestore(combined)
+    save_to_firestore(combined, branch_name=branch_name)
 
     print("\n✅ 更新完成！")
 
