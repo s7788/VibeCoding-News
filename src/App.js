@@ -288,13 +288,6 @@ const trumpStatements = [
   },
 ];
 
-const trumpPolicy = [
-  { icon: "🕊️", title: "宣布美伊雙邊停火兩週", desc: "川普稱已收到伊朗 10 點方案，認為是「可行的談判基礎」。停火條件：伊朗完全、立即、安全開放荷莫茲海峽。油價暴跌 17%。" },
-  { icon: "💊", title: "藥品關稅 100%（大量豁免）", desc: "「解放日」一週年，簽署新行政命令。多數大型藥企因已增加美國製造而實際稅率為 0%。" },
-  { icon: "🔩", title: "鋼鋁銅關稅調整計算方式", desc: "稅率維持 50% 但改以美國現貨價計算，實際進口商繳稅額將增加。含金屬低於 15% 產品可豁免。" },
-  { icon: "⚖️", title: "Section 301 調查啟動", desc: "針對多國展開新一輪貿易調查，中國同步反調查。5 月川習峰會在即，為新一波關稅戰做準備。" },
-];
-
 // ─── AI 各家更新 ─────────────────────────────────────────────────────────────
 const aiCompanyUpdates = [
   {
@@ -885,13 +878,16 @@ function IranWar({ market }) {
 function TrumpWatch({ statements }) {
   const [showTimeline, setShowTimeline] = useState(true);
   const liveStatements = statements || trumpStatements;
+  const latestStatement = liveStatements[0] || null;
 
   return (
     <div>
       <Card style={{ background: "#faf8f2", borderColor: "#e0d9c8" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>📌「解放日」一週年回顧</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>📌 近 30 天川普言論重點</div>
         <p style={{ fontSize: 13, lineHeight: 1.7, color: "#4d4c48", margin: 0 }}>
-          2025/4/2 的「解放日」關稅已過一年。關稅政策經歷超過 50 次變更。最高法院已否決 IEEPA 關稅權限。目前有效關稅率從 2% 升至約 13.7%，每戶家庭平均增加 $1,500 稅負。製造業就業反而減少 89,000 個工作。
+          {latestStatement
+            ? `最新一筆為 ${latestStatement.date}，來源 ${latestStatement.platform}。本區塊只保留近 30 天與川普本人發言、貼文、訪談或關稅表態直接相關的內容。`
+            : "本區塊只保留近 30 天與川普本人發言、貼文、訪談或關稅表態直接相關的內容。"}
         </p>
       </Card>
 
@@ -947,26 +943,12 @@ function TrumpWatch({ statements }) {
         </Card>
       )}
 
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginBottom: 12 }}>📋 本週政策動態</div>
-      {trumpPolicy.map((p, i) => (
-        <Card key={i}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ fontSize: 28, lineHeight: 1 }}>{p.icon}</div>
-            <div>
-              <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 6px", color: "#141413" }}>{p.title}</h3>
-              <p style={{ fontSize: 13, lineHeight: 1.6, color: "#5e5d59", margin: 0 }}>{p.desc}</p>
-            </div>
-          </div>
-        </Card>
-      ))}
-
       <Card>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>🔮 未來焦點</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>🔎 觀察方式</div>
         <div style={{ fontSize: 13, color: "#4d4c48", lineHeight: 1.8 }}>
-          • 美中貿易：Section 301 調查啟動，5 月川習峰會在即<br />
-          • USMCA 聯合審查：美加墨貿易協定 2026 年重新談判<br />
-          • 關稅退款：$1,660 億退款機制預計 4 月中公布細節<br />
-          • Section 122 臨時關稅 7/24 到期，後續政策走向不明
+          • 只追蹤近 30 天的川普本人言論、貼文、訪談與關稅表態<br />
+          • 若沒有新發言，這裡會保留最近一次仍在 30 天窗口內的事件<br />
+          • 市場影響以即時新聞 headline 為主，不再混用舊的固定政策敘事
         </div>
       </Card>
     </div>
