@@ -14,6 +14,7 @@ import time
 import traceback
 import urllib.parse
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import feedparser
 import firebase_admin
@@ -106,10 +107,13 @@ def compact_number(num_str):
 def parse_published_timestamp(value):
     if not value:
         return 0
-    parsed = feedparser._parse_date(value)
-    if not parsed:
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
         return 0
-    return int(time.mktime(parsed))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
 
 
 def yf_history(symbol, range_="7d", interval="1d"):
