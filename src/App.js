@@ -515,6 +515,10 @@ export default function MorningBriefing() {
   const liveTechNews = live.techNews || techNews;
   const liveTrumpStatements = live.trumpStatements || trumpStatements;
   const liveAiUpdates = live.aiUpdates || null;
+  const liveAiCompanyUpdates = live.aiCompanyUpdates || aiCompanyUpdates;
+  const liveAiArticles = live.aiArticles || aiArticles;
+  const liveGithubRepos = live.githubRepos || githubRepos;
+  const liveGithubTrendSummary = live.githubTrendSummary || [];
 
   const renderSection = () => {
     switch (active) {
@@ -523,8 +527,8 @@ export default function MorningBriefing() {
       case 2: return <TechStocks news={liveTechNews} />;
       case 3: return <IranWar market={liveMarket} />;
       case 4: return <TrumpWatch statements={liveTrumpStatements} />;
-      case 5: return <AIFrontier liveUpdates={liveAiUpdates} />;
-      case 6: return <GitHubTrending />;
+      case 5: return <AIFrontier liveUpdates={liveAiUpdates} companyUpdates={liveAiCompanyUpdates} articles={liveAiArticles} />;
+      case 6: return <GitHubTrending repos={liveGithubRepos} trendSummary={liveGithubTrendSummary} />;
       default: return null;
     }
   };
@@ -893,7 +897,7 @@ function TrumpWatch({ statements }) {
 
       {/* 發言時序 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#141413" }}>🗣️ 川普近期發言時序</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#141413" }}>🗣️ 川普近 30 天動態時序</div>
         <button
           onClick={() => setShowTimeline(!showTimeline)}
           style={{
@@ -935,6 +939,14 @@ function TrumpWatch({ statements }) {
         </div>
       )}
 
+      {!liveStatements.length && (
+        <Card>
+          <div style={{ fontSize: 13, color: "#5e5d59", lineHeight: 1.7 }}>
+            近 30 天內沒有可用的川普政策 / 發言時序資料。
+          </div>
+        </Card>
+      )}
+
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginBottom: 12 }}>📋 本週政策動態</div>
       {trumpPolicy.map((p, i) => (
         <Card key={i}>
@@ -971,8 +983,15 @@ const AI_COMPANY_KEY_MAP = {
   codex: "OpenAI Codex",
 };
 
-function AIFrontier({ liveUpdates }) {
+function AIFrontier({ liveUpdates, companyUpdates, articles }) {
   const [selectedCompany, setSelectedCompany] = useState(null);
+  const companyDefaults = Object.fromEntries(aiCompanyUpdates.map((item) => [item.company, item]));
+  const companies = (companyUpdates || aiCompanyUpdates).map((item) => ({
+    ...(companyDefaults[item.company] || {}),
+    ...item,
+    updates: item.updates || [],
+  }));
+  const readingList = articles || aiArticles;
 
   return (
     <div>
@@ -985,7 +1004,7 @@ function AIFrontier({ liveUpdates }) {
 
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginBottom: 12 }}>📡 各家 AI 最新動態</div>
 
-      {aiCompanyUpdates.map((company, ci) => {
+      {companies.map((company, ci) => {
         // 找出此公司對應的 liveUpdates key
         const liveKey = Object.entries(AI_COMPANY_KEY_MAP).find(([, v]) => v === company.company)?.[0];
         const liveText = liveUpdates?.[liveKey];
@@ -1009,7 +1028,7 @@ function AIFrontier({ liveUpdates }) {
               </div>
             </div>
 
-            {/* Gemini 生成的即時摘要 */}
+            {/* OpenAI 生成的即時摘要 */}
             {liveText && (
               <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: company.color + "10", borderLeft: `3px solid ${company.color}` }}>
                 <div style={{ fontSize: 10, fontWeight: 700, color: company.color, marginBottom: 3 }}>🤖 今日 AI 摘要</div>
@@ -1029,6 +1048,11 @@ function AIFrontier({ liveUpdates }) {
                     <div style={{ fontSize: 12, lineHeight: 1.6, color: "#5e5d59" }}>{update.desc}</div>
                   </div>
                 ))}
+                {!company.updates.length && (
+                  <div style={{ padding: "10px 14px", borderRadius: 10, background: "#fff", color: "#87867f", fontSize: 12 }}>
+                    近 14 天無明確重大更新。
+                  </div>
+                )}
               </div>
             )}
           </Card>
@@ -1036,7 +1060,7 @@ function AIFrontier({ liveUpdates }) {
       })}
 
       <div style={{ fontSize: 14, fontWeight: 700, color: "#141413", marginTop: 20, marginBottom: 12 }}>📰 延伸閱讀</div>
-      {aiArticles.map((a, i) => (
+      {readingList.map((a, i) => (
         <Card key={i}>
           <h3 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 6px", color: "#141413" }}>{a.title}</h3>
           <Badge color="#10b981">{a.source}</Badge>
@@ -1059,7 +1083,14 @@ function AIFrontier({ liveUpdates }) {
 }
 
 // ─── GitHub 熱門 ─────────────────────────────────────────────────────────────
-function GitHubTrending() {
+function GitHubTrending({ repos, trendSummary }) {
+  const liveRepos = repos || githubRepos;
+  const summary = trendSummary?.length ? trendSummary : [
+    "AI Agent 類專案仍是近期開源焦點。",
+    "Trending 排名請以 GitHub 官方頁面為準。",
+    "若資料未同步，可能仍顯示內建備援內容。",
+  ];
+
   return (
     <div>
       <Card style={{ background: "#faf8f2", borderColor: "#e0d9c8" }}>
@@ -1070,11 +1101,11 @@ function GitHubTrending() {
           <span style={{ fontSize: 15, fontWeight: 700, color: "#141413" }}>GitHub Trending Top 10</span>
         </div>
         <p style={{ fontSize: 13, lineHeight: 1.6, color: "#87867f", margin: 0 }}>
-          來源：Trendshift.io（2026/4/5）。本週 AI Agent 類專案持續強勢霸榜，Rust 語言專案表現亮眼。
+          來源：GitHub Trending。列表在每次資料更新時重新抓取 [github.com/trending](https://github.com/trending)。
         </p>
       </Card>
 
-      {githubRepos.map((repo, i) => (
+      {liveRepos.map((repo, i) => (
         <Card key={i}>
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{
@@ -1092,16 +1123,21 @@ function GitHubTrending() {
               </div>
               <p style={{ fontSize: 12, lineHeight: 1.6, color: "#87867f", margin: "0 0 8px" }}>{repo.desc}</p>
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#87867f" }}>
-                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: langColors[repo.lang] || "#8b949e", display: "inline-block" }} />
-                  {repo.lang}
-                </span>
-                <span style={{ fontSize: 11, color: "#87867f" }}>⭐ {repo.stars}</span>
-                <span style={{ fontSize: 11, color: "#87867f" }}>🍴 {repo.forks}</span>
+                {repo.lang && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#87867f" }}>
+                    <span style={{ width: 10, height: 10, borderRadius: "50%", background: langColors[repo.lang] || "#8b949e", display: "inline-block" }} />
+                    {repo.lang}
+                  </span>
+                )}
+                {repo.stars && <span style={{ fontSize: 11, color: "#87867f" }}>⭐ {repo.stars}</span>}
+                {repo.forks && <span style={{ fontSize: 11, color: "#87867f" }}>🍴 {repo.forks}</span>}
+                {repo.starsToday && <span style={{ fontSize: 11, color: "#c96442" }}>📈 今日 +{repo.starsToday}</span>}
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                {repo.tags.map((tag, j) => <Badge key={j} color="#6e54cc">{tag}</Badge>)}
-              </div>
+              {!!repo.tags?.length && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                  {repo.tags.map((tag, j) => <Badge key={j} color="#6e54cc">{tag}</Badge>)}
+                </div>
+              )}
             </div>
           </div>
         </Card>
@@ -1110,11 +1146,7 @@ function GitHubTrending() {
       <Card>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#c96442", marginBottom: 8 }}>📊 本週趨勢觀察</div>
         <div style={{ fontSize: 13, color: "#4d4c48", lineHeight: 1.8 }}>
-          • <strong>AI Agent 全面主導</strong>：Top 10 中有 7 個專案與 AI Agent 相關<br />
-          • <strong>Rust 語言崛起</strong>：claw-code（166.8k⭐）與 goose 均用 Rust 打造<br />
-          • <strong>DESIGN.md 概念爆紅</strong>：讓 AI 自動匹配 UI 設計的新範式<br />
-          • <strong>Claude Code 持續火熱</strong>：Anthropic 官方工具突破 107k 星<br />
-          • <strong>知識圖譜 + MCP</strong>：code-review-graph 大幅減少 AI 的 token 消耗
+          {summary.map((item, i) => <div key={i}>• {item}</div>)}
         </div>
       </Card>
     </div>
