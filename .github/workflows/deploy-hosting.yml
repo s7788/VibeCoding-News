@@ -83,5 +83,98 @@ jobs:
           print("Firebase credentials 結構與 project_id 檢查通過。")
           PY
 
+      - name: Verify Firebase project access
+        shell: bash
+        env:
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          credentials_path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+          project_id = os.environ["FIREBASE_PROJECT_ID"]
+          token_url = "https://oauth2.googleapis.com/token"
+          project_url = f"https://firebase.googleapis.com/v1beta1/projects/{project_id}"
+
+          try:
+              payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              print(f"::error::無法讀取 service account JSON：{exc}")
+              sys.exit(1)
+
+          try:
+              import jwt  # type: ignore
+          except ImportError:
+              print("Installing PyJWT for Firebase access verification...")
+              import subprocess
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "PyJWT", "cryptography"])
+              import jwt  # type: ignore
+
+          now = int(__import__("time").time())
+          assertion = jwt.encode(
+              {
+                  "iss": payload["client_email"],
+                  "scope": "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase",
+                  "aud": token_url,
+                  "iat": now,
+                  "exp": now + 3600,
+              },
+              payload["private_key"],
+              algorithm="RS256",
+          )
+
+          token_request = urllib.request.Request(
+              token_url,
+              data=urllib.parse.urlencode(
+                  {
+                      "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                      "assertion": assertion,
+                  }
+              ).encode(),
+              headers={"Content-Type": "application/x-www-form-urlencoded"},
+          )
+
+          try:
+              with urllib.request.urlopen(token_request, timeout=30) as response:
+                  token_payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", errors="replace")
+              print(f"::error::無法用 service account 換取 access token：HTTP {exc.code} {detail}")
+              sys.exit(1)
+
+          access_token = token_payload.get("access_token")
+          if not access_token:
+              print("::error::Google OAuth 回應缺少 access_token。")
+              sys.exit(1)
+
+          project_request = urllib.request.Request(
+              project_url,
+              headers={"Authorization": f"Bearer {access_token}"},
+          )
+
+          try:
+              with urllib.request.urlopen(project_request, timeout=30) as response:
+                  project_payload = json.loads(response.read().decode("utf-8"))
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", errors="replace")
+              print(
+                  "::error::Service account 無法存取目標 Firebase project。"
+                  f" client_email={payload['client_email']} project_id={project_id} "
+                  f"HTTP {exc.code} {detail}"
+              )
+              sys.exit(1)
+
+          print(
+              "Firebase project access verified:"
+              f" projectNumber={project_payload.get('projectNumber', 'unknown')}"
+          )
+          PY
+
       - name: Deploy to Firebase Hosting
         run: npx firebase-tools deploy --only hosting --project "$FIREBASE_PROJECT_ID" --non-interactive
