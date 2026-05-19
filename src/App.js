@@ -8,6 +8,7 @@ const GITHUB_REPO = "VibeCoding-News";
 const GITHUB_WORKFLOW = "update-news.yml";
 const GITHUB_REF = "master";
 const DEV_TRIGGER_TOKEN_KEY = "news-briefing-dev-update-token";
+const GITHUB_WORKFLOW_TOKEN = process.env.REACT_APP_GITHUB_WORKFLOW_TOKEN || "";
 const LIVE_DATA_MAX_AGE_DAYS = 3;
 
 async function fetchBriefingFromFirestore() {
@@ -52,6 +53,12 @@ async function dispatchUpdateWorkflow(token, reason) {
     }
     throw new Error(`GitHub API ${res.status}: ${detail}`);
   }
+}
+
+function getGithubRepoUrl(repo) {
+  if (repo?.url) return repo.url;
+  if (!repo?.name) return "#";
+  return `https://github.com/${repo.name}`;
 }
 
 // ─── 分頁定義 ─────────────────────────────────────────────────────────────────
@@ -370,7 +377,10 @@ const githubRepos = [
   { rank: 8, name: "NVIDIA/personaplex", lang: "Python", stars: "6k", forks: "920", desc: "NVIDIA 的 PersonaPlex——支援 600+ 種語言的高品質語音克隆 TTS 技術。", tags: ["AI Voice", "NVIDIA"], isNew: true },
   { rank: 9, name: "NousResearch/hermes-agent", lang: "Python", stars: "23.9k", forks: "3.1k", desc: "與你一起成長的 AI Agent。NousResearch 的可進化、可學習代理系統。", tags: ["AI Agent", "AI Skills"], isNew: true },
   { rank: 10, name: "tirth8205/code-review-graph", lang: "Python", stars: "4.1k", forks: "364", desc: "為 Claude Code 建構本地知識圖譜。讓 Claude 只讀取關鍵程式碼——Code Review token 用量減少 6.8 倍。", tags: ["MCP", "AI coding"], isNew: true },
-];
+].map((repo) => ({
+  ...repo,
+  url: repo.url || `https://github.com/${repo.name}`,
+}));
 
 const langColors = { Rust: "#dea584", Python: "#3572A5", TypeScript: "#3178c6", JavaScript: "#f1e05a", Shell: "#89e051", HTML: "#e34c26" };
 
@@ -464,20 +474,17 @@ export default function MorningBriefing() {
   const triggerImmediateUpdate = useCallback(async () => {
     if (typeof window === "undefined") return;
 
-    const cachedToken = window.sessionStorage.getItem(DEV_TRIGGER_TOKEN_KEY) || "";
-    const token = window.prompt("輸入 GitHub Personal Access Token 以觸發更新 workflow", cachedToken)?.trim();
-    if (!token) return;
-
+    const token = GITHUB_WORKFLOW_TOKEN || window.sessionStorage.getItem(DEV_TRIGGER_TOKEN_KEY)?.trim() || "";
+    if (!token) {
+      setDispatchMessage("觸發失敗：目前未設定 workflow token，請在前端環境變數設定 REACT_APP_GITHUB_WORKFLOW_TOKEN。");
+      return;
+    }
     const defaultReason = `前端開發測試觸發 ${new Date().toLocaleString("sv-SE", { timeZone: "Asia/Taipei" })}`;
-    const reason = window.prompt("本次 workflow_dispatch 的原因", defaultReason);
-    if (reason === null) return;
-
-    window.sessionStorage.setItem(DEV_TRIGGER_TOKEN_KEY, token);
     setDispatchMessage(null);
     setIsDispatchingUpdate(true);
 
     try {
-      await dispatchUpdateWorkflow(token, reason.trim() || defaultReason);
+      await dispatchUpdateWorkflow(token, defaultReason);
       setDispatchMessage("已送出背景更新，等待 GitHub Actions 完成後再按一次手動更新即可讀到最新資料。");
     } catch (err) {
       setDispatchMessage(`觸發失敗：${err.message}`);
@@ -1106,9 +1113,26 @@ function GitHubTrending({ repos, trendSummary }) {
             }}>{repo.rank}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "#c96442", wordBreak: "break-all" }}>{repo.name}</span>
+                <a
+                  href={getGithubRepoUrl(repo)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 14, fontWeight: 700, color: "#c96442", wordBreak: "break-all", textDecoration: "none" }}
+                >
+                  {repo.name}
+                </a>
                 {repo.isNew && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "#ecfdf5", color: "#166534" }}>NEW</span>}
                 {repo.hot && <span style={{ fontSize: 12 }}>🔥</span>}
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <a
+                  href={getGithubRepoUrl(repo)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 11, color: "#87867f", wordBreak: "break-all" }}
+                >
+                  {getGithubRepoUrl(repo)}
+                </a>
               </div>
               <p style={{ fontSize: 12, lineHeight: 1.6, color: "#87867f", margin: "0 0 8px" }}>{repo.desc}</p>
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

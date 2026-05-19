@@ -39,5 +39,49 @@ jobs:
           printf '%s' "$FIREBASE_HOSTING_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase-service-account.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
 
+      - name: Validate Firebase credentials
+        shell: bash
+        env:
+          FIREBASE_PROJECT_ID: ${{ env.FIREBASE_PROJECT_ID }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          credentials_path = Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"])
+          project_id = os.environ["FIREBASE_PROJECT_ID"]
+
+          try:
+              payload = json.loads(credentials_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              print(f"::error::FIREBASE_HOSTING_SERVICE_ACCOUNT 不是有效的 JSON：{exc}")
+              sys.exit(1)
+
+          required_fields = ["type", "project_id", "client_email", "private_key"]
+          missing = [field for field in required_fields if not payload.get(field)]
+          if missing:
+              print(f"::error::FIREBASE_HOSTING_SERVICE_ACCOUNT 缺少必要欄位：{', '.join(missing)}")
+              sys.exit(1)
+
+          if payload["type"] != "service_account":
+              print(f"::error::憑證 type 必須是 service_account，實際為 {payload['type']!r}")
+              sys.exit(1)
+
+          print(f"Credential client_email: {payload['client_email']}")
+          print(f"Credential project_id: {payload['project_id']}")
+          print(f"Target Firebase project: {project_id}")
+
+          if payload["project_id"] != project_id:
+              print(
+                  "::error::FIREBASE_HOSTING_SERVICE_ACCOUNT 的 project_id 與部署目標不一致。"
+                  f" credentials={payload['project_id']} target={project_id}"
+              )
+              sys.exit(1)
+
+          print("Firebase credentials 結構與 project_id 檢查通過。")
+          PY
+
       - name: Deploy to Firebase Hosting
         run: npx firebase-tools deploy --only hosting --project "$FIREBASE_PROJECT_ID" --non-interactive
